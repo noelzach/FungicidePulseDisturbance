@@ -1,0 +1,555 @@
+---
+title: "Fungicide"
+author: "Zachary Noel"
+date: "3/29/2020"
+output: html_document
+---
+## Loading packages
+```{r SOURCE}
+source('functions_themes.R')
+```
+
+```{r setup, include=FALSE}
+#source('http://bioconductor.org/biocLite.R')
+#biocLite('phyloseq')
+library(phyloseq)
+library(decontam)
+#browseVignettes("phyloseq")
+
+packages <- c("biomformat", "qiimer", "MASS", "ape", "ggplot2", "plyr", "indicspecies", "labdsv", "dplyr", "reshape", "vegan", "metacoder", "lme4", "lsmeans", "ggpmisc", "ggpubr", "tidyverse", "doParallel", "DT", "exactRankTests", "foreach", "Rcpp", "shiny", "coin", "igraph", "SpiecEasi", "ggsci", "RCy3", "ggrepel", "cowplot", "ggalt", "ggfortify", "emmeans", "data.table", "randomForest", "rfUtilities", "caret", "tidyr")
+ipak(packages)
+
+packageVersion("vegan")
+packageVersion('phyloseq')
+
+#install.packages("remotes")
+remotes::install_github("DanielSprockett/reltools")
+library(reltools)
+#install.packages("minpack.lm")
+library(minpack.lm)
+#Models for the whole community
+#install.packages("devtools")
+library(devtools)
+#install_github("DanielSprockett/tyRa")
+#install.packages("Hmisc")
+library(Hmisc)
+library(Biostrings)
+library(ggforce)
+library(cowplot)
+library(randomForest)
+library(rfUtilities) # to test model significance
+library(caret) # to get leave-one-out cross-validation accuracies and also contains the nearZeroVar function 
+library(NetworkExtinction)
+library(ggraph)
+library(tidygraph)
+library(metagenomeSeq)
+```
+
+# Bacteria
+## Load in data - skip if you already have the .RDS file below
+```{r Bacteria - Metadata}
+#Loading the mapping file
+samp_dat_bacteria <- read.csv("../Fungicide/Bacteria/Metadata/FungicideStudyMetadata_Bacteria.csv", na.strings = "NA")
+
+rownames(samp_dat_bacteria) <- samp_dat_bacteria$SampleID #row names must match OTU table headers
+SAMP.bacteria <- phyloseq::sample_data(samp_dat_bacteria)
+```
+
+```{r Bacteria - OTU table}
+# OTU table 
+otu_bacteria <- read.csv("../Fungicide/Bacteria/OTU/Table/otu_table_16s_UPARSE.csv")
+rownames(otu_bacteria) <- otu_bacteria$OTU
+otu_bacteria <- otu_bacteria[,-1]
+OTU.bacteria <- phyloseq::otu_table(otu_bacteria, taxa_are_rows = TRUE)
+```
+
+```{r Bacteria - Taxonomy Refined}
+silva_taxonomy_16s <-
+  read.delim("../Fungicide/Bacteria/OTU/Taxonomy/consensus_taxonomy_Prok_Euk.txt",
+             header = TRUE,
+             row.names = 1)
+
+head(silva_taxonomy_16s)
+
+# cleaning taxonomy labels ---------------------------------------------------------------------------------------------
+colnames(silva_taxonomy_16s) <-
+  c("Kingdom",
+    "Phylum",
+    "Class",
+    "Order",
+    "Family",
+    "Genus",
+    "Species",
+    "OTU_ID",
+    "High_level_taxonomy",
+    "hit_percent_id")
+
+silva_taxonomy_16s$OTU_ID <- rownames(silva_taxonomy_16s)
+
+silva_taxonomy_16s[, "Kingdom"] <- as.factor(gsub("_1", "", silva_taxonomy_16s[, "Kingdom"]))
+silva_taxonomy_16s[, "Phylum"] <- as.factor(gsub("_1", "", silva_taxonomy_16s[, "Phylum"]))
+silva_taxonomy_16s[, "Class"] <- as.factor(gsub("_1", "", silva_taxonomy_16s[, "Class"]))
+silva_taxonomy_16s[, "Order"] <- as.factor(gsub("_1", "",silva_taxonomy_16s[, "Order"]))
+silva_taxonomy_16s[, "Family"] <- as.factor(gsub("_1", "", silva_taxonomy_16s[, "Family"]))
+silva_taxonomy_16s[, "Genus"] <- as.factor(gsub("_1", "", silva_taxonomy_16s[, "Genus"]))
+silva_taxonomy_16s[, "Species"] <- as.factor(gsub("_1", "", silva_taxonomy_16s[, "Species"]))
+
+head(silva_taxonomy_16s)
+str(silva_taxonomy_16s)
+
+# silva_taxonomy_16s[1:50,]
+# endsWith("aceae", as.character(silva_taxonomy_16s$Family))
+
+any(silva_taxonomy_16s$Kingdom == "Chloroplast")
+any(silva_taxonomy_16s$Kingdom == "Mitochondria")
+any(silva_taxonomy_16s$Phylum == "Chloroplast") 
+any(silva_taxonomy_16s$Phylum == "Mitochondria")
+any(silva_taxonomy_16s$Class == "Chloroplast")
+any(silva_taxonomy_16s$Class == "Mitochondria")
+any(silva_taxonomy_16s$Order == "Chloroplast") #TRUE
+any(silva_taxonomy_16s$Order == "Mitochondria")
+any(silva_taxonomy_16s$Family == "Chloroplast") 
+any(silva_taxonomy_16s$Family == "Mitochondria")#TRUE
+any(silva_taxonomy_16s$Genus == "Chloroplast")
+any(silva_taxonomy_16s$Genus == "Mitochondria")
+
+silva_taxonomy_16s %>% dplyr::filter(silva_taxonomy_16s$Order == "Chloroplast")
+silva_taxonomy_16s %>% dplyr::filter(silva_taxonomy_16s$Family == "Mitochondria")
+silva_taxonomy_16s_clean <- subset(silva_taxonomy_16s, Family != "Mitochondria" & Order!= "Chloroplast")
+dim(silva_taxonomy_16s_clean)
+
+# Check for unclassified OTUs and remove them
+any(silva_taxonomy_16s_clean$Kingdom == "")
+nrow(silva_taxonomy_16s_clean[silva_taxonomy_16s_clean$Kingdom == "", ])
+silva_taxonomy_16s_clean[silva_taxonomy_16s_clean$Kingdom == "", ]
+
+silva_taxonomy_16s_clean %>% dplyr::filter(silva_taxonomy_16s_clean$Kingdom == "")
+silva_taxonomy_16s_clean <- subset(silva_taxonomy_16s_clean, Kingdom != "")
+dim(silva_taxonomy_16s_clean)
+
+# Removing fungal and other non-target taxa ----------------------------------------------------------------------------
+head(silva_taxonomy_16s_clean)
+levels(silva_taxonomy_16s_clean$High_level_taxonomy)
+
+silva_taxonomy_16s_clean %>% dplyr::filter(silva_taxonomy_16s_clean$High_level_taxonomy == "Alveolata")
+silva_taxonomy_16s_clean %>% dplyr::filter(silva_taxonomy_16s_clean$High_level_taxonomy == "Fungi")
+silva_taxonomy_16s_clean %>% dplyr::filter(silva_taxonomy_16s_clean$High_level_taxonomy == "Stramenopila")
+silva_taxonomy_16s_clean %>% dplyr::filter(silva_taxonomy_16s_clean$High_level_taxonomy == "Viridiplantae")
+head(silva_taxonomy_16s_clean %>% dplyr::filter(silva_taxonomy_16s_clean$High_level_taxonomy == ""))
+
+
+silva_taxonomy_16s_clean_filt <- subset(silva_taxonomy_16s_clean, 
+                                        High_level_taxonomy != "Alveolata" & 
+                                          High_level_taxonomy!= "Fungi" &
+                                          High_level_taxonomy!= "Stramenopila" &
+                                          High_level_taxonomy!= "Viridiplantae")
+dim(silva_taxonomy_16s_clean_filt)
+
+TAX.bacteria.SILVA <- phyloseq::tax_table(as.matrix(silva_taxonomy_16s_clean_filt))
+```
+
+```{r Bacteria - FASTA}
+FASTA.bacteria <- readDNAStringSet("../Fungicide/Bacteria/OTU/Fasta/otus_16s.fasta", format="fasta", seek.first.rec=TRUE, use.names=TRUE)
+```
+
+```{r}
+physeq_prok_nonfilt <- phyloseq::phyloseq(OTU.bacteria, TAX.bacteria.SILVA, FASTA.bacteria, SAMP.bacteria)
+```
+
+```{r}
+physeq_prok_nonorm_filtax <- ReformatTaxonomy(physeq_prok_nonfilt)
+head(tax_table(physeq_prok_nonorm_filtax))
+saveRDS(physeq_prok_nonorm_filtax, "physeq_prok_nonorm_filtax_010621.rds")
+```
+
+## DECONTAMINATE
+-Use the full dataset to call contaminants, then remove them, if they exist in the non plant OTU dataset
+```{r Bacteria}
+physeq_prok_nonorm_filtax@sam_data$Sample_or_Control <- ifelse(physeq_prok_nonorm_filtax@sam_data$Objective == "NTC", "Control Sample", "True Sample")
+sample_data(physeq_prok_nonorm_filtax)$is.neg <- sample_data(physeq_prok_nonorm_filtax)$Sample_or_Control == "Control Sample"
+contamdf.prev <- isContaminant(physeq_prok_nonorm_filtax, method="prevalence", neg="is.neg", threshold = 0.1, normalize = TRUE)
+badTaxa <- rownames(contamdf.prev[contamdf.prev$contaminant == TRUE,])
+
+print(badTaxa)
+
+ps.pa <- transform_sample_counts(physeq_prok_nonorm_filtax, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$Sample_or_Control == "Control Sample", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$Sample_or_Control == "True Sample", ps.pa)
+# Make data.frame of prevalence in positive and negative samples
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                      contaminant=contamdf.prev$contaminant)
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) + geom_point() +
+  xlab("Prevalence (Negative Controls)") + ylab("Prevalence (True Samples)")
+
+goodTaxa <- setdiff(taxa_names(physeq_prok_nonorm_filtax), badTaxa)
+bacteria_sub_no_bad <- prune_taxa(goodTaxa, physeq_prok_nonorm_filtax)
+```
+
+## Filter to Objective 2
+```{r OBJ 2 FILTER}
+# Sanity check - we only want OTUs that are Bacteria or Archeae
+unique(bacteria_sub_no_bad@tax_table@.Data[,2])# We want to get rid of Any chloroplast, Unidentified at the Kingdom Level, all we want are bacteria and Archaea
+
+bacteria.no.plant.obj2 <- bacteria_sub_no_bad %>% 
+  subset_samples(Objective == "Objective 2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) # remove taxa with zero reads (i.e., those not present in objective 2)
+
+sort(data.frame(sample_sums(bacteria.no.plant.obj2)))
+```
+
+## SAVE RDS BACTERIA NO PLANT UNEDITED
+```{r BACTERIA UNEDITED}
+# Save an object to a file
+saveRDS(bacteria.no.plant.obj2, file = "Fungicide_Bacteria_RootsAndLeaves_obj2_unedited.rds")
+# Restore the object
+bacteria.no.plant.obj2.unedited <- readRDS(file = "Fungicide_Bacteria_RootsAndLeaves_obj2_unedited.rds")
+```
+
+## FILTER OUT SAMPLES BELOW 1000 reads
+```{r}
+bacteria.no.plant.obj2_1000reads <- prune_samples(sample_sums(bacteria.no.plant.obj2.unedited) > 1000, bacteria.no.plant.obj2.unedited) %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+```
+
+### BACTERIA FILTER 1,000 reads 
+```{r SUM READ SAMPLES}
+sum(taxa_sums(bacteria.no.plant.obj2_1000reads))
+```
+Final total for bacteria - 29,729,595 reads across 555 samples 
+
+```{r FUNGI X diff.}
+mean(sample_sums(bacteria.no.plant.obj2_1000reads)) # 53566.84
+median(sample_sums(bacteria.no.plant.obj2_1000reads)) # 47542
+```
+ 
+## BACTERIA NO NORM
+```{r BACTERIA No Norm - RDS}
+# Save an object to a file
+saveRDS(bacteria.no.plant.obj2_1000reads, file = "Fungicide_Bacteria_RootsAndLeaves_newtaxa_nonorm_010621.rds")
+# Restore the object
+bacteria.no.norm <- readRDS(file = "Fungicide_Bacteria_RootsAndLeaves_newtaxa_nonorm_010621.rds")
+```
+
+### Rarecurves
+```{r}
+sam.data <- data.frame(bacteria.no.norm@sam_data)
+bOTU.table <- bacteria.no.norm@otu_table
+S <- specnumber(t(bOTU.table)) # observed number of species
+raremax <- min(rowSums(t(bOTU.table)))
+Srare <- rarefy(t(bOTU.table), raremax)
+plot(S, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
+abline(0, 1)
+rare.bac <- rarecurve(t(bOTU.table), step = 500, sample = raremax, col = "blue", cex = 0.6)
+
+oom.rare.curve.extract <- NULL
+for(i in 1:length(rare.bac)){
+sample.200 <- data.frame(rare.spec = rare.bac[[i]])
+sample.200$read_depth <- attr(rare.bac[[i]], "Subsample")
+sample.200$SampleID <- rownames(t(bOTU.table[,i]))
+oom.rare.curve.extract <- rbind.data.frame(oom.rare.curve.extract, sample.200)
+}
+oom.rare.curve.extract2 <- left_join(sam.data, oom.rare.curve.extract, by = "SampleID")
+
+ggplot(oom.rare.curve.extract2, aes(x = read_depth, y = rare.spec, group = SampleID, color = GrowthStage)) + 
+  #geom_point() +
+  geom_line() + 
+  xlab("Reads") + 
+  ylab("Number of OTUs") + 
+  theme_classic() + 
+  geom_vline(xintercept = raremax, linetype = "dashed") +
+  facet_wrap(~Crop*Compartment, scales = "free") +
+  theme(legend.position="none")
+
+```
+
+
+```{r FUNGI CSS norm.}
+MGS <- phyloseq_to_metagenomeSeq(bacteria.no.norm)
+
+p <- metagenomeSeq::cumNormStatFast(MGS)
+
+MGS <- metagenomeSeq::cumNorm(MGS, p =p)
+
+metagenomeSeq::normFactors(MGS) # exports the normalized factors for each sample
+
+norm.bacteria <- metagenomeSeq::MRcounts(MGS, norm = T)
+
+norm.bacteria.OTU <- phyloseq::otu_table(norm.bacteria, taxa_are_rows = TRUE)
+```
+
+New phyloseq object 
+```{r NORM PHYLOSEQ}
+bacteria.css.norm <- phyloseq::phyloseq(norm.bacteria.OTU, TAX.bacteria.SILVA, FASTA.bacteria, SAMP.bacteria)
+```
+
+## BACTERIA CSS NORM RDS
+Save the fungi phyloseq object as an RDS file to load faster in future.
+```{r BACTERIA CSS NORM - RDS}
+# Save an object to a file
+saveRDS(bacteria.css.norm, file = "Fungicide_Bacteria_RootsAndLeaves_newtaxa_CSSnorm_010621.rds")
+# Restore the object
+bacteria.css.norm <- readRDS(file = "Fungicide_Bacteria_RootsAndLeaves_newtaxa_CSSnorm_010621.rds")
+```
+
+ 
+
+
+# Fungi
+## Load in data - skip if you already have the .RDS file below
+```{r FUNGI - Metadata}
+#Loading the mapping file
+samp_dat <- read.csv("../Fungicide/Fungi/Metadata/FungicideStudy_Metadata.csv", na.strings = "NA")
+
+rownames(samp_dat) <- samp_dat$SampleID #row names must match OTU table headers
+SAMP.fungi <- phyloseq::sample_data(samp_dat)
+```
+
+```{r FUNGI - OTU table}
+# OTU table 
+otu <- read.csv("../Fungicide/Fungi/OTU/Table/otu_table_ITS_UPARSE_R1.csv")
+rownames(otu) <- otu$OTU
+otu <- otu[,-1]
+OTU.fungi <- phyloseq::otu_table(otu, taxa_are_rows = TRUE)
+
+any(is.na(otu)) # no NA in the OTU table
+```
+
+```{r}
+# 1) FUNGI: UNITE - EUKARYOTE taxonomy ---------------------------------------------------------------------------------
+# Importing taxonomies at 0.6 confidence -------------------------------------------------------------------------------
+taxonomy_ITS06 <-
+  read.delim(
+    "../Fungicide/Fungi/OTU/Taxonomy/consensus_taxonomy_euk_06.txt",
+    header = TRUE,
+    row.names = 1,
+    sep = "\t")
+
+head(taxonomy_ITS06)
+taxonomy_ITS06[1:100, ]
+
+# Importing taxonomies at 0.8 confidence -------------------------------------------------------------------------------
+taxonomy_ITS08 <-
+  read.delim(
+    "../Fungicide/Fungi/OTU/Taxonomy/consensus_taxonomy_euk_08.txt",
+    header = TRUE,
+    row.names = 1, 
+    sep = "\t")
+
+head(taxonomy_ITS08)
+taxonomy_ITS08[1:100, ]
+
+# check for identical ordering
+identical(rownames(taxonomy_ITS06), rownames(taxonomy_ITS08))
+
+taxonomy_ITS08$Kingdom_06 <- taxonomy_ITS06$Kingdom
+head(taxonomy_ITS08)
+taxonomy_ITS08[1:100, ]
+dim(taxonomy_ITS08)
+
+levels(taxonomy_ITS08$Kingdom)
+
+# how many unclassified OTUs in the two taxonomies?
+nrow(taxonomy_ITS06[taxonomy_ITS06$Kingdom!="Fungi",])
+nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom!="Fungi",])
+
+# Non-target taxa
+nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Ichthyosporia",])
+nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Metazoa",])
+nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Protista",])
+nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Rhizaria",])
+nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Stramenopila",])
+nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Viridiplantae",])
+nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="",])
+
+nrow(taxonomy_ITS08[taxonomy_ITS06$Kingdom=="Fungi",])
+
+# removing non-fungal OTUs
+subset(taxonomy_ITS08, taxonomy_ITS08$Kingdom_06 == "Fungi") -> taxonomy_ITS08_filt
+dim(taxonomy_ITS08_filt)
+str(taxonomy_ITS08_filt)
+
+# checking filtering results
+nrow(taxonomy_ITS08_filt[taxonomy_ITS08_filt$Kingdom != "Fungi", ])
+nrow(taxonomy_ITS08_filt[taxonomy_ITS08_filt$Kingdom_06 != "Fungi", ])
+
+# classify all OTUs at 60% identity to Fungi
+taxonomy_ITS08_filt$Kingdom <- taxonomy_ITS08_filt$Kingdom_06
+
+# formatting ranks
+dim(taxonomy_ITS08_filt)
+taxonomy_ITS08_filt <- taxonomy_ITS08_filt[, 1:9]
+taxonomy_ITS08_filt$OTU_ID <- rownames(taxonomy_ITS08_filt)
+
+taxonomy_ITS08_filt <- taxonomy_ITS08_filt[, c(
+  "Kingdom",
+  "Phylum",
+  "Class",
+  "Order",
+  "Family",
+  "Genus",
+  "Species",
+  "OTU_ID",
+  "Isolate",
+  "Isolate_percent_id"
+)]
+
+# Reduce isolate name length
+taxonomy_ITS08_filt$Isolate <- gsub("\\|.*","",taxonomy_ITS08_filt$Isolate)
+head(taxonomy_ITS08_filt)
+
+# Removing Lab contaminants in the ITS data ----------------------------------------------------------------------------
+str(taxonomy_ITS08_filt)
+taxonomy_ITS08_filt[taxonomy_ITS08_filt$Order=="Mortierellales",]
+subset(taxonomy_ITS08_filt, taxonomy_ITS08_filt$Isolate_percent_id<=99) -> taxonomy_ITS08_clean
+dim(taxonomy_ITS08_clean)
+taxonomy_ITS08_clean[taxonomy_ITS08_clean$Family=="Mortierellaceae",]
+
+TAX.fungi <- phyloseq::tax_table(as.matrix(taxonomy_ITS08_clean))
+```
+
+```{r FUNGI - FASTA}
+FASTA.fungi <- readDNAStringSet("../Fungicide/Fungi/OTU/Fasta/otus_R1.fasta", format="fasta", seek.first.rec=TRUE, use.names=TRUE)
+```
+Phyloseq object
+```{r FUNGI - Phyloseq Object}
+fungi.unedited <- phyloseq::phyloseq(OTU.fungi, TAX.fungi, FASTA.fungi, SAMP.fungi)
+```
+
+## DECONTAMINATE
+```{r FUNGI}
+fungi.unedited@sam_data$Sample_or_Control <- ifelse(fungi.unedited@sam_data$Objective == "NTC", "Control Sample", "True Sample")
+sample_data(fungi.unedited)$is.neg <- sample_data(fungi.unedited)$Sample_or_Control == "Control Sample"
+contamdf.prev <- isContaminant(fungi.unedited, method="prevalence", neg="is.neg", threshold = 0.1, normalize = TRUE)
+badTaxa <- rownames(contamdf.prev[contamdf.prev$contaminant == TRUE,])
+
+print(badTaxa)
+
+ps.pa <- transform_sample_counts(fungi.unedited, function(abund) 1*(abund>0))
+ps.pa.neg <- prune_samples(sample_data(ps.pa)$Sample_or_Control == "Control Sample", ps.pa)
+ps.pa.pos <- prune_samples(sample_data(ps.pa)$Sample_or_Control == "True Sample", ps.pa)
+# Make data.frame of prevalence in positive and negative samples
+df.pa <- data.frame(pa.pos=taxa_sums(ps.pa.pos), pa.neg=taxa_sums(ps.pa.neg),
+                      contaminant=contamdf.prev$contaminant)
+ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) + geom_point() +
+  xlab("Prevalence (Negative Controls)") + ylab("Prevalence (True Samples)")
+
+goodTaxa <- setdiff(taxa_names(fungi.unedited), badTaxa)
+fungi_sub_no_bad <- prune_taxa(goodTaxa, fungi.unedited)
+```
+
+## Mock Community
+```{r}
+fungi_sub_no_bad %>% 
+  subset_samples(Objective == "PC") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 10, TRUE) %>%
+  plot_bar(fill="Species")# remove taxa with zero reads (i.e., those not present in objective 2)
+```
+
+
+## Filter to Objective 2 and only Fungi
+```{r OBJ 2 FILTER}
+unique(fungi_sub_no_bad@tax_table@.Data[,2])# We want to get rid of Mockmycota
+
+fungi_obj2 <- fungi_sub_no_bad %>% 
+  subset_samples(Objective == "Objective 2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) # remove taxa with zero reads (i.e., those not present in objective 2)
+```
+
+### SAVE RDS FUNGI UNEDITED
+```{r FUNGI UNEDITED}
+# Save an object to a file
+saveRDS(fungi_obj2, file = "Fungicide_Fungi_RootsAndLeaves_obj2_unedited.rds")
+# Restore the object
+fungi.obj2.unedited <- readRDS(file = "Fungicide_Fungi_RootsAndLeaves_obj2_unedited.rds")
+```
+
+### FILTER FUNGI TO 1000 reads per sample
+```{r}
+fungi_obj2_1000reads <- prune_samples(sample_sums(fungi_obj2) > 1000, fungi_obj2) # filter samples that did not sequence at all
+```
+- 1000 reads drops 16 samples - 554
+
+## FUNGI FILTER 1000 reads 
+```{r SUM READ SAMPLES}
+sum(taxa_sums(fungi_obj2_1000reads))
+```
+Final total for fungi - 19611620 reads across 554 samples with 5304 taxa
+
+```{r FUNGI X diff.}
+mean(sample_sums(fungi_obj2_1000reads)) # 35400.04
+median(sample_sums(fungi_obj2_1000reads)) # 29347.5 reads
+max(sample_sums(fungi_obj2_1000reads))/min(sample_sums(fungi_obj2_1000reads))
+```
+164X difference in sequence depth, when cutting at 1000 reads/sample I will use CSS normalization. Not going to fix the problem, but its better than not normalizing. According to Weiss et al. 2017 a 10X difference in library sizes is a cuttoff for rarefying. 
+## Load Non-Normalized Data
+```{r FUNGI No Norm - RDS}
+# Save an object to a file
+saveRDS(fungi_obj2_1000reads, file = "Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm.rds")
+# Restore the object
+fungi.no.norm <- readRDS(file = "Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm.rds")
+```
+
+## Rarefaction analysis - with 1000 reads per sample object
+
+```{r}
+sam.data <- data.frame(fungi.no.norm.filt@sam_data)
+fOTU.table <- fungi.no.norm.filt@otu_table
+S <- specnumber(t(fOTU.table)) # observed number of species
+raremax <- min(rowSums(t(fOTU.table)))
+Srare <- rarefy(t(fOTU.table), raremax)
+plot(S, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
+abline(0, 1)
+rare.fun <- rarecurve(t(fOTU.table), step = 1000, sample = raremax, col = "blue", cex = 0.6)
+
+oom.rare.curve.extract <- NULL
+for(i in 1:length(rare.fun)){
+sample.200 <- data.frame(rare.spec = rare.fun[[i]])
+sample.200$read_depth <- attr(rare.fun[[i]], "Subsample")
+sample.200$SampleID <- rownames(t(fOTU.table[,i]))
+oom.rare.curve.extract <- rbind.data.frame(oom.rare.curve.extract, sample.200)
+}
+oom.rare.curve.extract2 <- left_join(sam.data, oom.rare.curve.extract, by = "SampleID")
+
+ggplot(oom.rare.curve.extract2, aes(x = read_depth, y = rare.spec, group = SampleID, color = GrowthStage)) + 
+  #geom_point() +
+  geom_line() + 
+  xlab("Reads") + 
+  ylab("Number of OTUs") + 
+  theme_classic() + 
+  geom_vline(xintercept = raremax, linetype = "dashed") +
+  facet_wrap(~Crop*Compartment, scales = "free") 
+
+```
+
+
+
+
+## RDS - FUNGI CSS Normalization
+
+```{r FUNGI CSS norm.}
+MGS <- phyloseq_to_metagenomeSeq(fungi.no.norm)
+p <- metagenomeSeq::cumNormStatFast(MGS)
+
+MGS <- metagenomeSeq::cumNorm(MGS, p =p)
+
+metagenomeSeq::normFactors(MGS) # exports the normalized factors for each sample
+
+norm.fungi <- metagenomeSeq::MRcounts(MGS, norm = T)
+
+norm.fungi.OTU <- phyloseq::otu_table(norm.fungi, taxa_are_rows = TRUE)
+```
+
+New phyloseq object 
+```{r NORM PHYLOSEQ}
+fungi.css.norm <- phyloseq::phyloseq(norm.fungi.OTU, TAX.fungi, FASTA.fungi, SAMP.fungi)
+```
+
+## FUNGI CSS NORM RDS
+Save the fungi phyloseq object as an RDS file to load faster in future.
+```{r FUNGI CSS NORM - RDS}
+# Save an object to a file
+saveRDS(fungi.css.norm, file = "Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm.rds")
+# Restore the object
+fungi.css.norm <- readRDS(file = "Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm.rds")
+```
+

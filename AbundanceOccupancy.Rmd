@@ -1,0 +1,1666 @@
+---
+title: "Fungicide - Differential Abundance & OccupancyAbundance"
+author: "Zachary Noel"
+date: "5/23/2020"
+output: html_document
+---
+
+## Loading packages
+```{r SOURCE}
+source('functions_themes.R')
+```
+
+```{r setup, include=FALSE}
+#source('http://bioconductor.org/biocLite.R')
+#biocLite('phyloseq')
+library(phyloseq)
+library(decontam)
+#browseVignettes("phyloseq")
+
+packages <- c("biomformat", "qiimer", "MASS", "ape", "ggplot2", "plyr", "indicspecies", "labdsv", "dplyr", "reshape", "vegan", "metacoder", "lme4", "lsmeans", "ggpmisc", "ggpubr", "tidyverse", "doParallel", "DT", "exactRankTests", "foreach", "Rcpp", "shiny", "coin", "igraph", "SpiecEasi", "ggsci", "RCy3", "ggrepel", "cowplot", "ggalt", "ggfortify", "emmeans", "data.table", "randomForest", "rfUtilities", "caret", "tidyr")
+ipak(packages)
+
+packageVersion("vegan")
+packageVersion('phyloseq')
+
+#install.packages("remotes")
+#remotes::install_github("DanielSprockett/reltools")
+library(reltools)
+#install.packages("minpack.lm")
+library(minpack.lm)
+#Models for the whole community
+#install.packages("devtools")
+library(devtools)
+#install_github("DanielSprockett/tyRa")
+#install.packages("Hmisc")
+library(Hmisc)
+library(Biostrings)
+library(ggforce)
+library(cowplot)
+library(randomForest)
+library(rfUtilities) # to test model significance
+library(caret) # to get leave-one-out cross-validation accuracies and also contains the nearZeroVar function 
+library(NetworkExtinction)
+library(ggraph)
+library(tidygraph)
+```
+
+## FUNGI CSS NORM RDS
+Save the fungi phyloseq object as an RDS file to load faster in future.
+```{r FUNGI CSS NORM - RDS}
+fungi.CSS.norm.filt <- readRDS(file = "physeq_fungi_CSS_filt_tax.rds")
+fungi.no.norm.filt <- readRDS(file = "physeq_fungi_nonorm_filt_tax.rds")
+```
+
+## PROKARYOTE CSS NORM and Non-normalized RDS
+```{r}
+# Restore the object
+bacteria.no.norm <- readRDS("physeq_prok_nonorm_filt_tax.rds")
+bacteria.css.norm <- readRDS(file = "physeq_prok_CSS_filtax.rds")
+```
+
+### Taxonomy of prokaryotes and fungi
+```{r}
+taxonomy <- fungi.no.norm.filt@tax_table %>%
+  as("matrix") %>%
+  replace_na("unidentified") %>%
+  as.tibble() %>%
+  mutate(OTU = OTU_ID)
+
+taxonomy.prok <- bacteria.no.norm@tax_table %>%
+  as("matrix") %>%
+  replace_na("unidentified") %>%
+  as.tibble() %>%
+  mutate(OTU = OTU_ID)
+```
+
+
+### ANCOM - differentially abundant OTUs
+-There was evidence that corn phyllosphere was altered dependent on fungicide and the when the fungicide was sprayed.
+-False positives were controlled statistically within ANCOM with a pvalue adjustment. 
+```{r}
+#### CORN V8 ####
+fungi_leaf_corn_V8_T1_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_corn_V8_T1_ANCOM.rds")
+colnames(fungi_leaf_corn_V8_T1_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_corn_V8_T1_ANCOM$GrowthStage <- "V8"
+fungi_leaf_corn_V8_T1_ANCOM$Crop <- "Corn"
+fungi_leaf_corn_V8_T1_ANCOM$Treatment <- "T1"
+fungi_leaf_corn_V8_T1_ANCOM$StructuralZero <- ifelse(fungi_leaf_corn_V8_T1_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_corn_V8_T1_ANCOM$OTU[fungi_leaf_corn_V8_T1_ANCOM$detected_0.7 == TRUE & fungi_leaf_corn_V8_T1_ANCOM$StructuralZero == FALSE]
+fungi_leaf_corn_V8_T1_sig <- fungi_leaf_corn_V8_T1_ANCOM$OTU[fungi_leaf_corn_V8_T1_ANCOM$detected_0.7 == TRUE]
+
+fungi_leaf_corn_V8_T2_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_corn_V8_T2_ANCOM.rds")
+colnames(fungi_leaf_corn_V8_T2_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_corn_V8_T2_ANCOM$GrowthStage <- "V8"
+fungi_leaf_corn_V8_T2_ANCOM$Crop <- "Corn"
+fungi_leaf_corn_V8_T2_ANCOM$Treatment <- "T2"
+fungi_leaf_corn_V8_T2_ANCOM$StructuralZero <- ifelse(fungi_leaf_corn_V8_T2_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_corn_V8_T2_ANCOM$OTU[fungi_leaf_corn_V8_T2_ANCOM$detected_0.7 == TRUE & fungi_leaf_corn_V8_T2_ANCOM$StructuralZero == FALSE]
+fungi_leaf_corn_V8_T2_sig <- fungi_leaf_corn_V8_T2_ANCOM$OTU[fungi_leaf_corn_V8_T2_ANCOM$detected_0.7 == TRUE]
+
+#### SOYBEAN BOTH GROWTH STAGES ####
+fungi_leaf_soy_R4_T1_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_soy_R4_T1_ANCOM.rds")
+colnames(fungi_leaf_soy_R4_T1_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_soy_R4_T1_ANCOM$GrowthStage <- "R4"
+fungi_leaf_soy_R4_T1_ANCOM$Crop <- "Soy"
+fungi_leaf_soy_R4_T1_ANCOM$Treatment <- "T1"
+fungi_leaf_soy_R4_T1_ANCOM$StructuralZero <- ifelse(fungi_leaf_soy_R4_T1_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_soy_R4_T1_ANCOM$OTU[fungi_leaf_soy_R4_T1_ANCOM$detected_0.7 == TRUE & fungi_leaf_soy_R4_T1_ANCOM$StructuralZero == FALSE]
+fungi_leaf_soy_R4_T1_sig <- fungi_leaf_soy_R4_T1_ANCOM$OTU[fungi_leaf_soy_R4_T1_ANCOM$detected_0.7 == TRUE]
+
+fungi_leaf_soy_R4_T2_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_soy_R4_T2_ANCOM.rds")
+colnames(fungi_leaf_soy_R4_T2_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_soy_R4_T2_ANCOM$GrowthStage <- "R4"
+fungi_leaf_soy_R4_T2_ANCOM$Crop <- "Soy"
+fungi_leaf_soy_R4_T2_ANCOM$Treatment <- "T2"
+fungi_leaf_soy_R4_T2_ANCOM$StructuralZero <- ifelse(fungi_leaf_soy_R4_T2_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_soy_R4_T2_ANCOM$OTU[fungi_leaf_soy_R4_T2_ANCOM$detected_0.7 == TRUE & fungi_leaf_soy_R4_T2_ANCOM$StructuralZero == FALSE]
+fungi_leaf_soy_R4_T2_sig <- fungi_leaf_soy_R4_T2_ANCOM$OTU[fungi_leaf_soy_R4_T2_ANCOM$detected_0.7 == TRUE]
+
+fungi_leaf_soy_R6_T1_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_soy_R6_T1_ANCOM.rds")
+colnames(fungi_leaf_soy_R6_T1_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_soy_R6_T1_ANCOM$GrowthStage <- "R6"
+fungi_leaf_soy_R6_T1_ANCOM$Crop <- "Soy"
+fungi_leaf_soy_R6_T1_ANCOM$Treatment <- "T1"
+fungi_leaf_soy_R6_T1_ANCOM$StructuralZero <- ifelse(fungi_leaf_soy_R6_T1_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_soy_R6_T1_ANCOM$OTU[fungi_leaf_soy_R6_T1_ANCOM$detected_0.7 == TRUE & fungi_leaf_soy_R6_T1_ANCOM$StructuralZero == FALSE]
+fungi_leaf_soy_R6_T1_sig <- fungi_leaf_soy_R6_T1_ANCOM$OTU[fungi_leaf_soy_R6_T1_ANCOM$detected_0.7 == TRUE]
+
+fungi_leaf_soy_R6_T2_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_soy_R6_T2_ANCOM.rds")
+colnames(fungi_leaf_soy_R6_T2_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_soy_R6_T2_ANCOM$GrowthStage <- "R6"
+fungi_leaf_soy_R6_T2_ANCOM$Crop <- "Soy"
+fungi_leaf_soy_R6_T2_ANCOM$Treatment <- "T2"
+fungi_leaf_soy_R6_T2_ANCOM$StructuralZero <- ifelse(fungi_leaf_soy_R6_T2_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_soy_R6_T2_ANCOM$OTU[fungi_leaf_soy_R6_T2_ANCOM$detected_0.7 == TRUE & fungi_leaf_soy_R6_T2_ANCOM$StructuralZero == FALSE]
+fungi_leaf_soy_R6_T2_sig <- fungi_leaf_soy_R6_T2_ANCOM$OTU[fungi_leaf_soy_R6_T2_ANCOM$detected_0.7 == TRUE]
+```
+
+### Composition of fungicide affected OTUs
+```{r}
+#### DIFF % RA SOY ####
+fungi.ra.soy <- fungi.no.norm.filt %>%  
+  subset_samples(Compartment == "Leaf" & Crop  == "Soy") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  phyloseq::transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  psmelt.fast() %>%                                         # Melt to long format
+  group_by(Fungicide, DateSampled, GrowthStage, Crop, Treatment) %>%
+  arrange(OTU)    # Sort data frame alphabetically by OTU
+mean.rel.abund <- fungi.ra.soy %>% 
+  group_by(OTU, Fungicide, DateSampled, GrowthStage, Crop, Treatment) %>% 
+  nest() %>%
+  mutate(mean.relabund = purrr::map(data,~mean(.$Abundance))) %>%
+  mutate(median.relabund = purrr::map(data,~median(.$Abundance))) %>%
+  mutate(SE.relabund = purrr::map(data,~sd(.$Abundance)/sqrt(length(.$Abundance)))) %>%
+  unnest(c(mean.relabund, SE.relabund, median.relabund))
+
+mean.rel.abund.fungicide.over.time.soy <- pivot_wider(mean.rel.abund, id_cols = c(OTU,Fungicide,GrowthStage, DateSampled, Crop,Treatment), names_from = Fungicide, values_from = c(mean.relabund)) # put the F and C abundances side-by-side
+mean.rel.abund.fungicide.over.time.soy$DateSampled <- as.Date(mean.rel.abund.fungicide.over.time.soy$DateSampled, "%d-%b-%y") # Change date to correct format
+mean.rel.abund.fungicide.over.time.soy$diff <- mean.rel.abund.fungicide.over.time.soy$F - mean.rel.abund.fungicide.over.time.soy$C
+
+#### COMPOSITION of Fungicide affected OTUS Soy #####
+
+ANCOM.combined.soy <- rbind.data.frame(fungi_leaf_soy_R4_T1_ANCOM, fungi_leaf_soy_R4_T2_ANCOM, fungi_leaf_soy_R6_T1_ANCOM, fungi_leaf_soy_R6_T2_ANCOM)
+
+ANCOM.combined2.soy <- left_join(ANCOM.combined.soy,taxonomy, by = "OTU")
+ANCOM.combined2.filt.soy <- ANCOM.combined2.soy[ANCOM.combined2.soy$detected_0.7 == "TRUE",]
+
+mean.rel.abund.fungicide.over.time2.soy <- left_join(mean.rel.abund.fungicide.over.time.soy, ANCOM.combined2.filt.soy, by = c("OTU", "Treatment", "Crop", "GrowthStage")) %>%
+  na.omit()
+
+mean.rel.abund.fungicide.over.time2.soy$Direction <- ifelse(mean.rel.abund.fungicide.over.time2.soy$diff < 0, "Decrease", "Increase")
+
+soy.T1.fungicide.decrease <- mean.rel.abund.fungicide.over.time2.soy$OTU[mean.rel.abund.fungicide.over.time2.soy$Direction == "Decrease" & mean.rel.abund.fungicide.over.time2.soy$Crop == "Soy" & mean.rel.abund.fungicide.over.time2.soy$Treatment == "T1"]
+soy.T1.fungicide.increase <- mean.rel.abund.fungicide.over.time2.soy$OTU[mean.rel.abund.fungicide.over.time2.soy$Direction == "Increase" & mean.rel.abund.fungicide.over.time2.soy$Crop == "Soy" & mean.rel.abund.fungicide.over.time2.soy$Treatment == "T1"]
+
+mean.rel.abund.fungicide.over.time3.soy <- mean.rel.abund.fungicide.over.time2.soy %>%
+  group_by(GrowthStage, Crop, Direction, Class, Treatment) %>%
+  nest() %>%
+  mutate(sum.fungicide.otus = purrr::map(data,~nrow(.))) %>%
+  unnest(sum.fungicide.otus)
+
+mean.rel.abund.fungicide.over.time3.soy$bar.count <- ifelse(mean.rel.abund.fungicide.over.time3.soy$Direction == "Decrease", -mean.rel.abund.fungicide.over.time3.soy$sum.fungicide.otus, mean.rel.abund.fungicide.over.time3.soy$sum.fungicide.otus)
+
+class.label <- c("Agaricomycetes", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+
+mean.rel.abund.fungicide.over.time3.soy$class.label <- ifelse(mean.rel.abund.fungicide.over.time3.soy$Class %!in% class.label, "Other", mean.rel.abund.fungicide.over.time3.soy$Class)
+
+#### DIFF % RA CORN ####
+fungi.ra.corn <- fungi.no.norm.filt %>%  
+  subset_samples(Compartment == "Leaf" & Crop  == "Corn") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  phyloseq::transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  psmelt.fast() %>%                                         # Melt to long format
+  group_by(Fungicide, DateSampled, GrowthStage, Crop, Treatment) %>%
+  arrange(OTU)    # Sort data frame alphabetically by OTU
+mean.rel.abund <- fungi.ra.corn %>% 
+  group_by(OTU, Fungicide, DateSampled, GrowthStage, Crop, Treatment) %>% 
+  nest() %>%
+  mutate(mean.relabund = purrr::map(data,~mean(.$Abundance))) %>%
+  mutate(median.relabund = purrr::map(data,~median(.$Abundance))) %>%
+  mutate(SE.relabund = purrr::map(data,~sd(.$Abundance)/sqrt(length(.$Abundance)))) %>%
+  unnest(c(mean.relabund, SE.relabund, median.relabund))
+
+mean.rel.abund.fungicide.over.time.corn <- pivot_wider(mean.rel.abund, id_cols = c(OTU,Fungicide,GrowthStage, DateSampled, Crop,Treatment), names_from = Fungicide, values_from = c(mean.relabund)) # put the F and C abundances side-by-side
+mean.rel.abund.fungicide.over.time.corn$DateSampled <- as.Date(mean.rel.abund.fungicide.over.time.corn$DateSampled, "%d-%b-%y") # Change date to correct format
+mean.rel.abund.fungicide.over.time.corn$diff <- mean.rel.abund.fungicide.over.time.corn$F - mean.rel.abund.fungicide.over.time.corn$C
+
+#### COMPOSITION of Fungicide affected OTUS Corn #####
+
+ANCOM.combined.corn <- rbind.data.frame(fungi_leaf_corn_V8_T1_ANCOM, fungi_leaf_corn_V8_T2_ANCOM)
+
+ANCOM.combined2.corn <- left_join(ANCOM.combined.corn,taxonomy, by = "OTU")
+ANCOM.combined2.filt.corn <- ANCOM.combined2.corn[ANCOM.combined2.corn$detected_0.7 == "TRUE",]
+
+mean.rel.abund.fungicide.over.time2.corn <- left_join(mean.rel.abund.fungicide.over.time.corn, ANCOM.combined2.filt.corn, by = c("OTU", "Treatment", "Crop", "GrowthStage")) %>%
+  na.omit()
+
+mean.rel.abund.fungicide.over.time2.corn$Direction <- ifelse(mean.rel.abund.fungicide.over.time2.corn$diff < 0, "Decrease", "Increase")
+
+corn.T1.fungicide.decrease <- mean.rel.abund.fungicide.over.time2.corn$OTU[mean.rel.abund.fungicide.over.time2.corn$Direction == "Decrease" & mean.rel.abund.fungicide.over.time2.corn$Crop == "Corn" & mean.rel.abund.fungicide.over.time2.corn$Treatment == "T1"]
+corn.T1.fungicide.increase <- mean.rel.abund.fungicide.over.time2.corn$OTU[mean.rel.abund.fungicide.over.time2.corn$Direction == "Increase" & mean.rel.abund.fungicide.over.time2.corn$Crop == "Corn" & mean.rel.abund.fungicide.over.time2.corn$Treatment == "T1"]
+
+mean.rel.abund.fungicide.over.time3.corn <- mean.rel.abund.fungicide.over.time2.corn %>%
+  group_by(GrowthStage, Crop, Direction, Class, Treatment) %>%
+  nest() %>%
+  mutate(sum.fungicide.otus = purrr::map(data,~nrow(.))) %>%
+  unnest(sum.fungicide.otus)
+
+mean.rel.abund.fungicide.over.time3.corn$bar.count <- ifelse(mean.rel.abund.fungicide.over.time3.corn$Direction == "Decrease", -mean.rel.abund.fungicide.over.time3.corn$sum.fungicide.otus, mean.rel.abund.fungicide.over.time3.corn$sum.fungicide.otus)
+
+class.label <- c("Agaricomycetes", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+
+mean.rel.abund.fungicide.over.time3.corn$class.label <- ifelse(mean.rel.abund.fungicide.over.time3.corn$Class %!in% class.label, "Other", mean.rel.abund.fungicide.over.time3.corn$Class)
+```
+
+### Plot the composition of differentially abundant OTUs
+```{r}
+mean.rel.abund.fungicide.over.time.combined <- rbind.data.frame(mean.rel.abund.fungicide.over.time3.soy, mean.rel.abund.fungicide.over.time3.corn)
+mean.rel.abund.fungicide.over.time.combined$x_axis <- interaction(mean.rel.abund.fungicide.over.time.combined$Crop, mean.rel.abund.fungicide.over.time.combined$GrowthStage, mean.rel.abund.fungicide.over.time.combined$Treatment)
+
+mean.rel.abund.fungicide.over.time.combined$x_axis <- factor(mean.rel.abund.fungicide.over.time.combined$x_axis,levels = c("Soy.R4.T1", "Soy.R6.T1", "Soy.R4.T2", "Soy.R6.T2", "Corn.V8.T1", "Corn.V8.T2"))
+
+#### PLOT COMPOSITION OF DIFFERENTIALLY ABUNDANT OTUS #### 
+Fig.2A.Composition.ANCOM <- ggplot(mean.rel.abund.fungicide.over.time.combined, aes(x = x_axis, y = bar.count)) +
+  geom_bar(aes(fill = class.label), stat = "identity") +
+  theme_classic() +
+  xlab("") + 
+  ylab("OTU count") + 
+  ggtitle("Fungi") +
+  scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  scale_x_discrete(labels = c("Soy Conv. 13-dpf", "Soy Conv. 33-dpf", "Soy No-till 13-dpf", "Soy No-till 33-dpf", "Corn Conv. 9-dpf", "Corn No-till 9-dpf")) +
+  geom_hline(yintercept = 0, lty = 2) +
+  ylim(c(-80, 15)) +
+theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="bottom",
+   legend.title = element_blank(), 
+   axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) 
+  #annotate("text", x = 3, y = 15, label = "Increased abundance") +
+  #annotate("text", x = 3, y = -80, label = "Decreased abundance")
+```
+
+```{r}
+mean.rel.abund.fungicide.over.time2.combined <- rbind.data.frame(mean.rel.abund.fungicide.over.time2.soy, mean.rel.abund.fungicide.over.time2.corn)
+mean.rel.abund.fungicide.over.time4.combined <- mean.rel.abund.fungicide.over.time2.combined %>%
+  group_by(GrowthStage, Crop, Direction, Class, Family, Treatment) %>%
+  nest() %>%
+  mutate(sum.fungicide.otus = purrr::map(data,~nrow(.))) %>%
+  unnest(sum.fungicide.otus)
+
+mean.rel.abund.fungicide.over.time4.combined$bar.count <- ifelse(mean.rel.abund.fungicide.over.time4.combined$Direction == "Decrease", -mean.rel.abund.fungicide.over.time4.combined$sum.fungicide.otus, mean.rel.abund.fungicide.over.time4.combined$sum.fungicide.otus)
+
+mean.rel.abund.fungicide.over.time4.combined$x_axis <- interaction(mean.rel.abund.fungicide.over.time4.combined$Crop, mean.rel.abund.fungicide.over.time4.combined$GrowthStage, mean.rel.abund.fungicide.over.time4.combined$Treatment)
+
+mean.rel.abund.fungicide.over.time4.combined$x_axis <- factor(mean.rel.abund.fungicide.over.time4.combined$x_axis,levels = c("Soy.R4.T1", "Soy.R6.T1", "Soy.R4.T2", "Soy.R6.T2", "Corn.V8.T1", "Corn.V8.T2"))
+
+Fig.2B.Soy.Trem.Composition.ANCOM <- mean.rel.abund.fungicide.over.time4.combined %>%
+  subset(Class == "Tremellomycetes") %>%
+ggplot(aes(x = x_axis, y = bar.count)) +
+  geom_bar(aes(fill = Family), stat = "identity") +
+  theme_classic() + 
+  xlab("") + 
+  ylab("OTU count") + 
+  ggtitle("Tremellomycetes") +
+  scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  scale_x_discrete(labels = c("Soy Conv. 13-dpf", "Soy Conv. 33-dpf", "Soy No-till 13-dpf", "Soy No-till 33-dpf", "Corn Conv. 9-dpf", "Corn No-till 9-dpf")) +
+  geom_hline(yintercept = 0, lty = 2) +
+  ylim(c(-30, 5)) +
+theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.title = element_blank(),
+   legend.position="bottom",
+   axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) 
+  #annotate("text", x = 3, y = 5, label = "Increased abundance") +
+  #annotate("text", x = 3, y = -30, label = "Decreased abundance")
+```
+
+### Recovered or non-recovered OTUs 
+- Corn communities recovered fully 
+- Soybeans did not 
+- This code only takes those that were significantly different, it does not tell which increased or decreased in abundance
+```{r}
+non_recovered_soy_T1 <- intersect(fungi_leaf_soy_R4_T1_sig, fungi_leaf_soy_R6_T1_sig) # the OTUs that were sig diff after R4 and R6
+recovered_soy_T1 <- setdiff(fungi_leaf_soy_R4_T1_sig, fungi_leaf_soy_R6_T1_sig)# the OTUs that were significant after R4 but not on R6
+secondary_nonrecovered_soy_T1 <- setdiff(fungi_leaf_soy_R6_T1_sig, fungi_leaf_soy_R4_T1_sig)# the OTUs that were significant after R6 but not on R4
+sig.diff.T1 <- union(fungi_leaf_soy_R4_T1_sig, fungi_leaf_soy_R6_T1_sig) # the total list of OTUs that was significant at R4 or R6
+
+# Sanity check - T1 soybean
+all(sort(c(setdiff(fungi_leaf_soy_R4_T1_sig,fungi_leaf_soy_R6_T1_sig),
+      intersect(fungi_leaf_soy_R6_T1_sig,fungi_leaf_soy_R4_T1_sig),
+      setdiff(fungi_leaf_soy_R6_T1_sig,fungi_leaf_soy_R4_T1_sig))) ==
+   sort(union(fungi_leaf_soy_R4_T1_sig,fungi_leaf_soy_R6_T1_sig)))
+
+
+sort(c(soy.T1.fungicide.decrease, soy.T1.fungicide.increase))
+
+
+non_recovered_soy_T2 <- intersect(fungi_leaf_soy_R4_T2_sig, fungi_leaf_soy_R6_T2_sig) # the OTUs that were sig diff after R4 and R6
+recovered_soy_T2 <- setdiff(fungi_leaf_soy_R4_T2_sig, fungi_leaf_soy_R6_T2_sig)# the OTUs that were significant after R4 but not on R6
+secondary_nonrecovered_soy_T2 <- setdiff(fungi_leaf_soy_R6_T2_sig, fungi_leaf_soy_R4_T2_sig)# the OTUs that were significant after R6 but not on R4
+sig.diff.T2 <- union(fungi_leaf_soy_R4_T2_sig, fungi_leaf_soy_R6_T2_sig) # the total list of OTUs that was significant at R4 or R6
+
+# Sanity check - T2 soybean
+all(sort(c(setdiff(fungi_leaf_soy_R4_T2_sig,fungi_leaf_soy_R6_T2_sig),
+      intersect(fungi_leaf_soy_R6_T2_sig,fungi_leaf_soy_R4_T2_sig),
+      setdiff(fungi_leaf_soy_R6_T2_sig,fungi_leaf_soy_R4_T2_sig))) ==
+   sort(union(fungi_leaf_soy_R4_T2_sig,fungi_leaf_soy_R6_T2_sig)))
+```
+
+### Plot the RA over-time of recovered and non-recovered OTUs
+```{r}
+#### CLR change ####
+fungi.clr <- microbiome::transform(fungi.no.norm.filt, 'clr') %>%  
+  subset_samples(Compartment == "Leaf") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  psmelt.fast() %>%                                         # Melt to long format
+  group_by(Fungicide, Treatment, DateSampled, GrowthStage, Crop) %>%
+  arrange(OTU)    # Sort data frame alphabetically by OTU
+mean.rel.abund <- fungi.clr %>% 
+  group_by(OTU, Fungicide, DateSampled, Treatment, GrowthStage, Crop) %>% 
+  nest() %>%
+  mutate(mean.relabund = purrr::map(data,~mean(.$Abundance))) %>%
+  mutate(median.relabund = purrr::map(data,~median(.$Abundance))) %>%
+  mutate(SE.relabund = purrr::map(data,~sd(.$Abundance)/sqrt(length(.$Abundance)))) %>%
+  unnest(mean.relabund, SE.relabund, median.relabund)
+
+mean.rel.abund.fungicide.over.time <- pivot_wider(mean.rel.abund, id_cols = c(OTU,Fungicide,GrowthStage, Treatment, DateSampled, Crop), names_from = Fungicide, values_from = c(mean.relabund)) # put the F and C abundances side-by-side
+mean.rel.abund.fungicide.over.time$DateSampled <- as.Date(mean.rel.abund.fungicide.over.time$DateSampled, "%d-%b-%y") # Change date to correct format
+
+mean.rel.abund.fungicide.over.time$diff <- mean.rel.abund.fungicide.over.time$F - mean.rel.abund.fungicide.over.time$C
+
+class.label <- c("Agaricomycetes", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+
+## T1 soybean 
+mean.rel.abund.fungicide.over.time %>%
+  left_join(taxonomy, by = "OTU") %>%
+  mutate(class.label = ifelse(Class %!in% class.label, "Other", Class)) %>%
+  mutate(Recover = ifelse(OTU %in% non_recovered_soy_T1, "Non-recovered", 
+                          ifelse(OTU %in% secondary_nonrecovered_soy_T1, "Indirect", "Recovered"))) %>%
+  subset(Treatment == "T1" & Crop == "Soy" & OTU %in% c(non_recovered_soy_T1, recovered_soy_T1, secondary_nonrecovered_soy_T1)) %>%
+ggplot() +
+  geom_line(aes(x = DateSampled, y = diff, group = interaction(Recover, OTU), color = class.label, alpha = 0.6), size = 0.5) + 
+  theme_bw() +
+  facet_wrap(~Recover, ncol = 1) + 
+  scale_color_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) +  
+  ylab("Mean CLR Difference") +
+  theme(
+  strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="bottom") + 
+  geom_vline(xintercept=as.numeric(mean.rel.abund.fungicide.over.time.soy$DateSampled[c(1, 1, 284, 284, 2, 2, 283, 283, 3,3,285,285)]),
+                linetype=4, colour="black") +
+  geom_hline(yintercept= 0,
+                linetype=4, colour="black")
+
+## T2 soybean 
+mean.rel.abund.fungicide.over.time %>%
+  left_join(taxonomy, by = "OTU") %>%
+  mutate(class.label = ifelse(Class %!in% class.label, "Other", Class)) %>%
+  mutate(Recover = ifelse(OTU %in% non_recovered_soy_T2, "Non-recovered", 
+                          ifelse(OTU %in% secondary_nonrecovered_soy_T2, "Indirect", "Recovered"))) %>%
+  subset(Treatment == "T2" & Crop == "Soy" & OTU %in% c(non_recovered_soy_T2, recovered_soy_T2, secondary_nonrecovered_soy_T2)) %>%
+ggplot() +
+  geom_line(aes(x = DateSampled, y = diff, group = interaction(Recover, OTU), color = class.label, alpha = 0.6), size = 0.5) + 
+  theme_bw() +
+  facet_wrap(~Recover, ncol = 1) + 
+  scale_color_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) +  
+  ylab("Mean CLR Difference") +
+  theme(
+  strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="bottom") + 
+  geom_vline(xintercept=as.numeric(mean.rel.abund.fungicide.over.time.soy$DateSampled[c(1, 1, 284, 284, 2, 2, 283, 283, 3,3,285,285)]),
+                linetype=4, colour="black") +
+  geom_hline(yintercept= 0,
+                linetype=4, colour="black")
+```
+
+Composition of recovered OTUs
+```{r}
+soy.no.till.classification <- as.data.frame(c(recovered_soy_T2, non_recovered_soy_T2, secondary_nonrecovered_soy_T2)) %>%
+  mutate(OTU = c(recovered_soy_T2, non_recovered_soy_T2, secondary_nonrecovered_soy_T2)) %>%
+  left_join(taxonomy, by = "OTU") %>% 
+  mutate(class.label = ifelse(Class %!in% class.label, "Other", Class)) %>%
+  mutate(Recover = ifelse(OTU %in% c(non_recovered_soy_T2, secondary_nonrecovered_soy_T2), "Non-recovered or Indirect", "Recovered")) %>%
+  mutate(Treatment = "No-till")
+
+soy.conv.classification <- as.data.frame(c(recovered_soy_T1, non_recovered_soy_T1, secondary_nonrecovered_soy_T1)) %>%
+  mutate(OTU = c(recovered_soy_T1, non_recovered_soy_T1, secondary_nonrecovered_soy_T1)) %>%
+  left_join(taxonomy, by = "OTU") %>% 
+  mutate(class.label = ifelse(Class %!in% class.label, "Other", Class)) %>%
+  mutate(Recover = ifelse(OTU %in% c(non_recovered_soy_T1, secondary_nonrecovered_soy_T1), "Non-recovered or Indirect", "Recovered")) %>%
+
+  mutate(Treatment = "Conv.")
+
+soy.classification <- rbind.data.frame(soy.no.till.classification[,-1], soy.conv.classification[,-1])
+  
+```
+
+- I am defining the local extinctions as those OTUs in T1 or T2 whose abundance went to 0 following fungicide application (at R4) and was still zero at (R6)
+```{r}
+### Corn ####
+present.V6 <- mean.rel.abund.fungicide.over.time.corn %>%
+  subset(GrowthStage == "V6" & F > 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+absent.V8 <- mean.rel.abund.fungicide.over.time.corn %>%
+  subset(GrowthStage == "V8" & F == 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+absent.V15 <- mean.rel.abund.fungicide.over.time.corn %>%
+  subset(GrowthStage == "V15" & F == 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+locally.extinct.fungicide.corn.putative <- intersect(present.V6$OTU, intersect(absent.V8$OTU, absent.V15$OTU))
+locally.extinct.fungicide.corn <- intersect(fungi_leaf_corn_V8_ANCOM_sig, locally.extinct.fungicide.corn.putative)
+# no local extinctions in corn.
+
+### Soybean-T1 ####
+present.R3.T1 <- mean.rel.abund.fungicide.over.time.soy %>%
+  subset(Treatment == "T1" & GrowthStage == "R3" & F > 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+absent.R4.T1 <- mean.rel.abund.fungicide.over.time.soy %>%
+  subset(Treatment == "T1" & GrowthStage == "R4" & F == 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+absent.R6.T1 <- mean.rel.abund.fungicide.over.time.soy %>%
+  subset(Treatment == "T1" & GrowthStage == "R6" & F == 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+# Total Soybean OTUs sig-different in either R6 and R4
+local.extinction.putative <- intersect(present.R3.T1$OTU, intersect(absent.R4.T1$OTU, absent.R6.T1$OTU))
+
+locally.extinct.fungicide.soy.T1 <- intersect(local.extinction.putative, soy.T1.fungicide)
+
+taxonomy[taxonomy$OTU %in% locally.extinct.fungicide.soy.T1,]
+
+soy.conv.classification$local.exinction <- ifelse(soy.conv.classification$OTU %in% locally.extinct.fungicide.soy.T1, "Local Extinction", soy.conv.classification$Recover)
+
+
+### Soybean-T2 ####
+present.R3.T2 <- mean.rel.abund.fungicide.over.time.soy %>%
+  subset(Treatment == "T2" & GrowthStage == "R3" & F > 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+absent.R4.T2 <- mean.rel.abund.fungicide.over.time.soy %>%
+  subset(Treatment == "T2" & GrowthStage == "R4" & F == 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+absent.R6.T2 <- mean.rel.abund.fungicide.over.time.soy %>%
+  subset(Treatment == "T2" & GrowthStage == "R6" & F == 0 & C > 0) %>%
+  as.data.frame() %>%
+  select(OTU) 
+
+# Total Soybean OTUs sig-different in either R6 and R4
+local.extinction.putative <- intersect(present.R3.T2$OTU, intersect(absent.R4.T2$OTU, absent.R6.T2$OTU))
+
+locally.extinct.fungicide.soy.T2 <- intersect(local.extinction.putative, soy.T2.fungicide)
+
+taxonomy[taxonomy$OTU %in% locally.extinct.fungicide.soy.T2,]
+
+soy.no.till.classification$local.exinction <- ifelse(soy.no.till.classification$OTU %in% locally.extinct.fungicide.soy.T2, "Local Extinction", soy.no.till.classification$Recover)
+
+soy.classification <- rbind.data.frame(soy.no.till.classification[,-1], soy.conv.classification[,-1])
+```
+
+A good majority of the Tremmellomycetes were within the Bulleribacideaceae family, lets plot that. 
+```{r}
+Fig.2C.Soy.Recover.ANCOM <- ggplot(soy.classification, aes(x = interaction(local.exinction, Treatment), fill = class.label)) +
+  geom_bar() +
+  theme_classic() + 
+  xlab("") + 
+  ylab("OTU count") + 
+  ggtitle("Fungi - Soybean") +
+  scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  scale_x_discrete(labels = c("Local Extinction", "Non-recovered \n or Indirect", "Recovered", 
+                              "Local Extinction", "Non-recovered \n or Indirect", "Recovered")) +
+theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="none",
+   legend.title = element_blank(),
+   axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  facet_wrap(~Treatment, scales = "free_x") 
+
+Trem.OTUs.recov <- soy.classification %>%
+  subset(Class == "Tremellomycetes") %>%
+ggplot(aes(x = interaction(local.exinction, Treatment), fill = Family)) +
+  geom_bar() +
+  theme_classic() + 
+  xlab("") + 
+  ylab("OTU count") + 
+  ggtitle("Tremellomycetes - Soybean") +
+scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[5], cbbPalette[8], cbbPalette[6], cbbPalette[7], "purple")) + 
+  scale_x_discrete(labels = c("Local Extinction", "Non-recovered \n or Indirect", "Recovered", 
+                              "Local Extinction", "Non-recovered \n or Indirect", "Recovered")) +
+theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="none",
+   legend.title = element_blank(),
+   axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  facet_wrap(~Treatment, scales = "free_x") 
+```
+
+Lets plot the bulleribacideaceae richness. 
+```{r}
+physeq_fungi_no_norm_bull <- fungi.no.norm.filt %>% 
+  subset_taxa(Family=="Bulleribasidiaceae") %>%
+  subset_samples(Compartment == "Leaf") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+physeq_fungi_no_norm_bull@sam_data$richness <- estimate_richness(physeq_fungi_no_norm_bull, measures=c("Observed"))$Observed
+physeq_fungi_no_norm_bull_samples <- data.frame(physeq_fungi_no_norm_bull@sam_data)
+physeq_fungi_no_norm_bull_samples$DateSampled <- as.Date(physeq_fungi_no_norm_bull_samples$DateSampled, "%d-%b-%y")
+
+physeq_fungi_no_norm_bull_samples$Treatment <- ifelse(physeq_fungi_no_norm_bull_samples$Treatment == "T1", "Conv.", "No-till")
+
+soybean.bull.richness <- ggplot(physeq_fungi_no_norm_bull_samples[physeq_fungi_no_norm_bull_samples$Crop == "Soy",], aes(x = DateSampled, y = richness, group = interaction(Fungicide, Treatment), color = Fungicide)) + 
+  geom_jitter(width = 0.5, alpha = 0.5) +
+  stat_summary(fun.y=mean,geom="line") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.5) +
+  
+  ylab("Bulleribasidiaceae richness") + 
+  #ggtitle("Fungi") + 
+  xlab("")+
+  scale_color_manual(values=cbbPalette) +
+  #scale_linetype_manual(values = c(rep("solid", 2), rep("dashed", 2))) +
+  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = TRUE, size = 6, label.y = 30) +
+  theme_classic() +
+  facet_wrap(~Treatment, scales = "free_x") +
+  theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="none",
+   legend.title = element_blank()) + 
+  ggtitle("Soybean")
+
+corn.bull.richness <- ggplot(physeq_fungi_no_norm_bull_samples[physeq_fungi_no_norm_bull_samples$Crop == "Corn",], aes(x = DateSampled, y = richness, group = interaction(Fungicide, Treatment), color = Fungicide)) + 
+  geom_jitter(width = 0.5, alpha = 0.5) +
+  stat_summary(fun.y=mean,geom="line") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0.5) +
+  
+  ylab("Bulleribasidiaceae richness") + 
+  #ggtitle("Fungi") + 
+  xlab("")+
+  scale_color_manual(values=cbbPalette) +
+  #scale_linetype_manual(values = c(rep("solid", 2), rep("dashed", 2))) +
+  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = TRUE, size = 6, label.y = 35) +
+  theme_classic() +
+  ylim(c(0,40))+
+  facet_wrap(~Treatment, scales = "free_x") +
+  theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="none",
+   legend.title = element_blank()) + 
+  ggtitle("Corn")
+
+```
+
+##### CORE
+
+### Priorizing the CORE microbiome as 
+- those OTUs that contribute to 98% of the Bray-Curtis distances. 
+- This code rely on rarefied reads. The function will rarefy. 
+```{r}
+core.prioritizing <- function(phyloseq.object){
+  
+set.seed(19)
+rare.phyloseq.object <- rarefy_even_depth(phyloseq.object, replace=TRUE)
+
+nReads=sample_sums(rare.phyloseq.object)[[1]]                                                                 # input dataset needs to be rarified and the rarifaction depth included 
+otu <- rare.phyloseq.object@otu_table %>%
+  as("matrix")
+map <- rare.phyloseq.object@sam_data %>%
+  as("data.frame")
+
+otu_PA <- 1*((otu>0)==1)                                               # presence-absence data
+otu_occ <- rowSums(otu_PA)/ncol(otu_PA)                                # occupancy calculation
+otu_rel <- apply(decostand(otu, method="total", MARGIN=2),1, mean)     # mean relative abundance
+occ_abun <- add_rownames(as.data.frame(cbind(otu_occ, otu_rel)),'otu') # combining occupancy and abundance data frame
+
+# Ranking OTUs based on their occupancy
+# For caluclating raking index we included following conditions:
+#   - time-specific occupancy (sumF) = frequency of detection within time point (genotype or site)
+#   - replication consistency (sumG) = has occupancy of 1 in at least one time point (genotype or site) (1 if occupancy 1, else 0)
+
+PresenceSum <- data.frame(otu = as.factor(row.names(otu)), otu) %>% 
+  gather(SampleID, abun, -otu) %>%
+  left_join(map, by = 'SampleID') %>%
+  group_by(otu, GrowthStage) %>%
+  dplyr::summarise(time_freq=sum(abun>0)/length(abun),            # frequency of detection between time points
+            coreTime=ifelse(time_freq == 1, 1, 0)) %>%     # 1 only if occupancy 1 with specific time, 0 if not
+  group_by(otu) %>%
+  dplyr::summarise(sumF=sum(time_freq),
+            sumG=sum(coreTime),
+            nS=length(GrowthStage)*2,           
+            Index=(sumF+sumG)/nS)                 # calculating weighting Index based on number of time points detected and 
+
+otu_ranked <- occ_abun %>%
+  left_join(PresenceSum, by='otu') %>%
+  transmute(otu=otu,
+            rank=Index) %>%
+  arrange(desc(rank))
+
+# Calculating the contribution of ranked OTUs to the BC similarity
+BCaddition <- NULL
+
+# calculating BC dissimilarity based on the 1st ranked OTU
+# with 36 samples there should be 630 combinations n!/r!
+otu_start=otu_ranked$otu[1]                   
+start_matrix <- as.matrix(otu[otu_start,])
+start_matrix <- t(start_matrix)
+x <- apply(combn(ncol(start_matrix), 2), 2, function(x) sum(abs(start_matrix[,x[1]]- start_matrix[,x[2]]))/(2*nReads))
+x_names <- apply(combn(ncol(start_matrix), 2), 2, function(x) paste(colnames(start_matrix)[x], collapse=' - '))
+df_s <- data.frame(x_names,x)
+df_s$rank_count <- 1
+BCaddition <- rbind(BCaddition,df_s)
+# calculating BC dissimilarity based on additon of ranked OTUs from 2nd to 500th. Can be set to the entire length of OTUs in the dataset, however it might take some time if more than 5000 OTUs are included.
+for(i in 2:500){                              
+  otu_add=otu_ranked$otu[i]                       
+  add_matrix <- as.matrix(otu[otu_add,])
+  add_matrix <- t(add_matrix)
+  start_matrix <- rbind(start_matrix, add_matrix)
+  x <- apply(combn(ncol(start_matrix), 2), 2, function(x) sum(abs(start_matrix[,x[1]]-start_matrix[,x[2]]))/(2*nReads))
+  #x_names <- apply(combn(ncol(start_matrix), 2), 2, function(x) paste(colnames(start_matrix)[x], collapse=' - '))
+  df_a <- data.frame(x_names,x)
+  df_a$rank_count <- i 
+  BCaddition <- rbind.data.frame(BCaddition, df_a)
+}
+# calculating the BC dissimilarity of the whole dataset (not needed if the second loop is already including all OTUs) 
+x <-  apply(combn(ncol(otu), 2), 2, function(x) sum(abs(otu[,x[1]]-otu[,x[2]]))/(2*nReads))   
+x_names <- apply(combn(ncol(otu), 2), 2, function(x) paste(colnames(otu)[x], collapse=' - '))
+df_full <- data.frame(x_names,x)
+df_full$rank_count <- length(rownames(otu))
+BCfull <- rbind.data.frame(BCaddition, df_full)
+
+BC_ranked <- BCfull %>%
+  group_by(rank_count) %>%
+  dplyr::summarise(MeanBC=mean(x)) %>%            # mean Bray-Curtis dissimilarity
+  arrange(desc(-MeanBC)) %>%
+  mutate(proportionBC=MeanBC/max(MeanBC))   # proportion of the dissimilarity explained by the n number of ranked OTUs
+Increase=BC_ranked$MeanBC[-1]/BC_ranked$MeanBC[-length(BC_ranked$MeanBC)]
+increaseDF <- data.frame(IncreaseBC=c(0,(Increase)), rank=factor(c(1:(length(Increase)+1))))
+increaseDF$rank <- as.numeric(increaseDF$rank)
+BC_ranked <- left_join(BC_ranked, increaseDF, by = c("rank_count" = "rank"))
+BC_ranked <- BC_ranked[-nrow(BC_ranked),]
+
+#Creating threshold for core inclusion - last call method
+
+#B) Final increase in BC similarity of equal or greater then 2% 
+lastCall <- last(as.numeric(BC_ranked$rank_count[(BC_ranked$IncreaseBC>=1.02)]))
+
+#Creating plot of Bray-Curtis similarity
+plot <- ggplot(BC_ranked[1:100,], aes(x=factor(BC_ranked$rank_count[1:100], levels=BC_ranked$rank_count[1:100]))) +
+  geom_point(aes(y=proportionBC)) +
+  theme_classic() + theme(strip.background = element_blank(),axis.text.x = element_text(size=7, angle=45)) +
+  geom_vline(xintercept=last(as.numeric(BC_ranked$rank_count[(BC_ranked$IncreaseBC>=1.02)])), lty=3, col='black', cex=.5) +
+  labs(x='ranked OTUs',y='Bray-Curtis similarity') +
+  annotate(geom="text", x=last(as.numeric(BC_ranked$rank[(BC_ranked$IncreaseBC>=1.02)]))+3, y=.5, label=paste("Last 2% increase (",last(as.numeric(BC_ranked$rank[(BC_ranked$IncreaseBC>=1.02)])),")",sep=''), color="black")
+
+core.otus.CSS.mean.T1 <- otu_ranked$otu[1:lastCall]
+return_list <- list(core.otus.CSS.mean.T1, plot, otu_ranked, occ_abun)
+return(return_list)
+}
+
+### Fungi ####
+fungi.no.norm.leaf.soy.control.T1 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Fungicide == "C" & Treatment == "T1") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+core.rare.soy.T1 <- core.prioritizing(fungi.no.norm.leaf.soy.control.T1)
+
+fungi.no.norm.leaf.soy.control.T2 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Fungicide == "C" & Treatment == "T2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+core.rare.soy.T2 <- core.prioritizing(fungi.no.norm.leaf.soy.control.T2)
+
+fungi.no.norm.leaf.corn.control.T1 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Fungicide == "C" & Treatment == "T1") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+core.rare.corn.T1 <- core.prioritizing(fungi.no.norm.leaf.corn.control.T1)
+
+fungi.no.norm.leaf.corn.control.T2 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Fungicide == "C" & Treatment == "T2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+core.rare.corn.T2 <- core.prioritizing(fungi.no.norm.leaf.corn.control.T2)
+
+### Bacteria #### 
+prok.no.norm.leaf.soy.control.T1 <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Fungicide == "C" & Treatment == "T1") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+core.rare.soy.T1.prok <- core.prioritizing(prok.no.norm.leaf.soy.control.T1)
+
+prok.no.norm.leaf.soy.control.T2 <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Fungicide == "C" & Treatment == "T2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+core.rare.soy.T2.prok <- core.prioritizing(prok.no.norm.leaf.soy.control.T2)
+
+prok.no.norm.leaf.corn.control.T1 <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Fungicide == "C" & Treatment == "T1") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+core.rare.corn.T1.prok <- core.prioritizing(prok.no.norm.leaf.corn.control.T1)
+
+prok.no.norm.leaf.corn.control.T2 <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Fungicide == "C" & Treatment == "T2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+core.rare.corn.T2.prok <- core.prioritizing(prok.no.norm.leaf.corn.control.T2)
+```
+
+```{r}
+core.rare.soy.T1[[1]] 
+core.rare.soy.T2[[1]]
+core.rare.corn.T1[[1]]
+core.rare.corn.T2[[1]]
+```
+
+```{r}
+soy.no.till.classification.occ.abund <- left_join(soy.no.till.classification, core.rare.soy.T2[[4]], by = c("OTU" = "otu"))
+soy.no.till.classification.occ.abund$Core <- ifelse(soy.no.till.classification.occ.abund$OTU %in% core.rare.soy.T2[[1]], "Core", "Not-core")
+soy.conv.classification.occ.abund <- left_join(soy.conv.classification, core.rare.soy.T1[[4]], by = c("OTU" = "otu"))
+soy.conv.classification.occ.abund$Core <- ifelse(soy.conv.classification.occ.abund$OTU %in% core.rare.soy.T1[[1]], "Core", "Not-core")
+
+colnames(soy.no.till.classification.occ.abund)
+colnames(soy.conv.classification.occ.abund)
+
+# Abundance occupancy in plots before fungicides were sprayed
+otu_t2 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T2" & GrowthStage == "R3") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  otu_table() %>%
+  as("matrix")
+
+otu_PA_t2 <- 1*((otu_t2>0)==1)                                               # presence-absence data
+otu_occ_t2 <- rowSums(otu_PA_t2)/ncol(otu_PA_t2)                                # occupancy calculation
+otu_rel_t2 <- apply(decostand(otu_t2, method="total", MARGIN=2),1, mean)     # mean relative abundance
+occ_abun_t2 <- add_rownames(as.data.frame(cbind(otu_occ_t2, otu_rel_t2)),'otu') # combining occupancy and abundance data frame
+occ_abun_t2$Treatment <- "No-till"
+colnames(occ_abun_t2) <- c("OTU", "Occupancy", "RelativeAbundance", "Treatment")
+
+otu_t1 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T1" & GrowthStage == "R3") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  otu_table() %>%
+  as("matrix")
+
+otu_PA_t1 <- 1*((otu_t1>0)==1)                                               # presence-absence data
+otu_occ_t1 <- rowSums(otu_PA_t1)/ncol(otu_PA_t1)                                # occupancy calculation
+otu_rel_t1 <- apply(decostand(otu_t1, method="total", MARGIN=2),1, mean)     # mean relative abundance
+occ_abun_t1 <- add_rownames(as.data.frame(cbind(otu_occ_t1, otu_rel_t1)),'otu') # combining occupancy and abundance data frame
+occ_abun_t1$Treatment <- "Conv."
+colnames(occ_abun_t1) <- c("OTU", "Occupancy", "RelativeAbundance", "Treatment")
+
+soy.no.till.classification.occ.abund <- left_join(soy.no.till.classification, occ_abun_t2, by = c("OTU"))
+soy.conv.classification.occ.abund <- left_join(soy.conv.classification.occ.abund, occ_abun_t1, by = c("OTU"))
+
+soy.classification.combined <- rbind.data.frame(soy.conv.classification.occ.abund[,-1], soy.no.till.classification.occ.abund[,-1])
+
+supp.figure <- ggplot(soy.conv.classification.combined, aes(x = local.exinction, y = otu_occ)) +
+  geom_boxplot() +
+  stat_compare_means(method = "kruskal") +
+  facet_wrap(~Treatment) + 
+  xlab("") + 
+  ylab("Occupancy") + 
+  theme_classic()
+```
+
+```{r}
+abund.occ.bull.soy <- soy.conv.classification.combined %>% 
+  subset(Family == "Bulleribasidiaceae") %>%
+ggplot() + 
+  geom_point(aes(x = log(otu_rel), y = otu_occ, fill = Genus, shape = interaction(local.exinction, Core)), size = 3, alpha = 0.8) + 
+  #scale_color_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[5], cbbPalette[8], cbbPalette[6], cbbPalette[7], "purple"), name = "Bulleribasidiaceae \n Genera") +
+    scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[5], cbbPalette[8], cbbPalette[6], cbbPalette[7], "purple"), name = "Bulleribasidiaceae \n Genera") +
+  scale_shape_manual(values = c(21, 22, 23, 24, 25), label = c("Part of Core \n Non-recovered or Indirect", "Part of Core \n Recovered", "Not part of core \n Local extinction", "Not part of core \n Non-recovered or Indirect", "Not part of core \n Recovered"), name = "") +
+  theme_classic() + 
+  facet_wrap(~Treatment) +
+  theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black")) +
+  guides(fill = guide_legend(override.aes=list(shape=21))) + 
+  xlab("log(Mean Relative Abundance)") + 
+  ylab("Occupancy") + 
+  ggtitle("Soybean")
+```
+
+```{r}
+Fig.2ab <- ggarrange(Fig.2A.Composition.ANCOM, Fig.2C.Soy.Recover.ANCOM, nrow = 1, ncol = 2, align = "h", labels = c("A", "B"), common.legend = T)
+
+Fig.2cd <- ggarrange(Fig.2B.Soy.Trem.Composition.ANCOM, Trem.OTUs.recov, nrow = 1, ncol = 2, align = "h", labels = c("C", "D"), common.legend = T)
+
+Fig.2ef <- ggarrange(soybean.bull.richness, corn.bull.richness, nrow = 1, ncol = 2, align = "h", labels = c("E", "F"), common.legend = T)
+
+Fig.2g <- ggarrange(abund.occ.bull.soy, labels = "G")
+
+ggarrange(Fig.2ab, Fig.2cd, Fig.2ef, Fig.2g)
+```
+
+
+
+Core composition
+```{r}
+#Subset to only core members and calculate RA - based on CSS normalized reads
+class.label <- c("Agaricomycetes", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+
+class.label.bacteria <- c("Alpha", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+
+# Soybean
+
+#### T1 - Fungi ####
+fungi_core_T1_C_RA <- fungi.no.norm.filt %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T1" & Fungicide == "C") %>%
+  phyloseq::subset_taxa(OTU_ID %in% core.rare.soy.T1[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+fungi_core_T1_C_RA$Fungicide <- "Control"
+
+fungi_core_T1_F_RA <- fungi.no.norm.filt %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T1" & Fungicide == "F") %>%
+  phyloseq::subset_taxa(OTU_ID %in% core.rare.soy.T1[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+fungi_core_T1_F_RA$Fungicide <- "Fungicide"
+
+T1.combined <- rbind.data.frame(fungi_core_T1_C_RA, fungi_core_T1_F_RA)
+T1.combined$class.label <- ifelse(as.character(T1.combined$Genus) %!in% class.label, "Other", as.character(T1.combined$Genus))
+
+fungi_core_T1_RA_composition <- ggplot(T1.combined, aes(x = Fungicide, y = Abundance, fill = Genus)) + 
+  facet_wrap(~Sample, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  ylab("Relative Abundance (%)") +
+  xlab("") +
+  #scale_fill_manual(values = c(cbbPalette[3], cbbPalette[5], cbbPalette[7], cbbPalette[6], "grey",  cbbPalette[7],  "purple")) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(name = "Fungicide",labels=c("Control" = "-", "Fungicide" = "+")) +
+  labs(fill = "Class") +
+  theme(legend.text = element_text(size = 10),
+          legend.key = element_blank(),
+          legend.title = element_text(size = 10),
+          legend.position = "right", 
+          strip.text.x = element_text(size = 10, vjust=2),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+fungi_core_T1_RA_composition
+
+#### T2 - Fungi ####
+fungi_core_T2_C_RA <- fungi.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T2" & Fungicide == "C") %>%
+  subset_taxa(OTU %in% core.rare.soy.T2[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+fungi_core_T2_C_RA$Fungicide <- "Control"
+
+fungi_core_T2_F_RA <- fungi.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T2" & Fungicide == "F") %>%
+  subset_taxa(OTU %in% core.rare.soy.T2[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+fungi_core_T2_F_RA$Fungicide <- "Fungicide"
+
+T2.combined <- rbind.data.frame(fungi_core_T2_C_RA, fungi_core_T2_F_RA)
+T2.combined$class.label <- ifelse(as.character(T2.combined$Class) %!in% class.label, "Other", as.character(T2.combined$Class))
+
+fungi_core_T2_RA_composition <- ggplot(T2.combined, aes(x = Fungicide, y = Abundance, fill = Class)) + 
+  facet_wrap(~Sample, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  ylab("Relative Abundance (%)") +
+  xlab("") +
+  scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], cbbPalette[6], "grey",  cbbPalette[7],  "purple")) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(name = "Fungicide",labels=c("Control" = "-", "Fungicide" = "+")) +
+  labs(fill = "Class") +
+  theme(legend.text = element_text(size = 10),
+          legend.key = element_blank(),
+          legend.title = element_text(size = 10),
+          legend.position = "none", 
+          strip.text.x = element_text(size = 10, vjust=2),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+fungi_core_T2_RA_composition
+
+# Corn
+
+
+#### T1 - Bacteria ####
+bacteria_soy_core_T1_C_RA <- bacteria.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T1" & Fungicide == "C") %>%
+  subset_taxa(OTU %in% core.rare.soy.T1.prok[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+bacteria_soy_core_T1_C_RA$Fungicide <- "Control"
+
+bacteria_soy_core_T1_F_RA <- bacteria.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T1" & Fungicide == "F") %>%
+  subset_taxa(OTU %in% core.rare.soy.T1.prok[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+bacteria_soy_core_T1_F_RA$Fungicide <- "Fungicide"
+
+T1.bacteria.soy.combined <- rbind.data.frame(bacteria_soy_core_T1_C_RA, bacteria_soy_core_T1_F_RA)
+T1.bacteria.soy.combined$class.label <- ifelse(as.character(T1.bacteria.soy.combined$Genus) %!in% class.label, "Other", as.character(T1.bacteria.soy.combined$Genus))
+
+fungi_core_T1_RA_composition <- ggplot(T1.bacteria.soy.combined, aes(x = Fungicide, y = Abundance, fill = Genus)) + 
+  facet_wrap(~Sample, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  ylab("Relative Abundance (%)") +
+  xlab("") +
+  #scale_fill_manual(values = c(cbbPalette[3], cbbPalette[5], cbbPalette[7], cbbPalette[6], "grey",  cbbPalette[7],  "purple")) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(name = "Fungicide",labels=c("Control" = "-", "Fungicide" = "+")) +
+  labs(fill = "Class") +
+  theme(legend.text = element_text(size = 10),
+          legend.key = element_blank(),
+          legend.title = element_text(size = 10),
+          legend.position = "right", 
+          strip.text.x = element_text(size = 10, vjust=2),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+fungi_core_T1_RA_composition
+
+#### T2 - Bacteria ####
+bacteria_soy_core_T2_C_RA <- bacteria.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T2" & Fungicide == "C") %>%
+  subset_taxa(OTU %in% core.rare.soy.T2.prok[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+bacteria_soy_core_T2_C_RA$Fungicide <- "Control"
+
+bacteria_soy_core_T2_F_RA <- bacteria.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T2" & Fungicide == "F") %>%
+  subset_taxa(OTU %in% core.rare.soy.T2.prok[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+bacteria_soy_core_T2_F_RA$Fungicide <- "Fungicide"
+
+T2.soy.combined <- rbind.data.frame(bacteria_soy_core_T2_C_RA, bacteria_soy_core_T2_F_RA)
+T2.soy.combined$class.label <- ifelse(as.character(T2.combined$Class) %!in% class.label, "Other", as.character(T2.combined$Class))
+
+bacteria_core_T2_RA_composition <- ggplot(T2.soy.combined, aes(x = Fungicide, y = Abundance, fill = Genus)) + 
+  facet_wrap(~Sample, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  ylab("Relative Abundance (%)") +
+  xlab("") +
+  #scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], cbbPalette[6], "grey",  cbbPalette[7],  "purple")) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(name = "Fungicide",labels=c("Control" = "-", "Fungicide" = "+")) +
+  labs(fill = "Class") +
+  theme(legend.text = element_text(size = 10),
+          legend.key = element_blank(),
+          legend.title = element_text(size = 10),
+          legend.position = "right", 
+          strip.text.x = element_text(size = 10, vjust=2),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+bacteria_core_T2_RA_composition
+
+# Corn
+
+
+# Corn
+
+
+
+
+# Corn
+
+#### T1 - Fungi ####
+fungi_corn_core_T1_C_RA <- fungi.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Treatment == "T1" & Fungicide == "C") %>%
+  subset_taxa(OTU %in% core.rare.soy.T1[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+fungi_corn_core_T1_C_RA$Fungicide <- "Control"
+
+fungi_corn_core_T1_F_RA <- fungi.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T1" & Fungicide == "F") %>%
+  subset_taxa(OTU %in% core.rare.soy.T1[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+fungi_corn_core_T1_F_RA$Fungicide <- "Fungicide"
+
+T1.corn.combined <- rbind.data.frame(fungi_corn_core_T1_C_RA, fungi_corn_core_T1_F_RA)
+T1.corn.combined$class.label <- ifelse(as.character(T1.corn.combined$Genus) %!in% class.label, "Other", as.character(T1.corn.combined$Genus))
+
+fungi_core_corn_T1_RA_composition <- ggplot(T1.corn.combined, aes(x = Fungicide, y = Abundance, fill = Genus)) + 
+  facet_wrap(~Sample, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  ylab("Relative Abundance (%)") +
+  xlab("") +
+  #scale_fill_manual(values = c(cbbPalette[3], cbbPalette[5], cbbPalette[7], cbbPalette[6], "grey",  cbbPalette[7],  "purple")) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(name = "Fungicide",labels=c("Control" = "-", "Fungicide" = "+")) +
+  labs(fill = "Class") +
+  theme(legend.text = element_text(size = 10),
+          legend.key = element_blank(),
+          legend.title = element_text(size = 10),
+          legend.position = "right", 
+          strip.text.x = element_text(size = 10, vjust=2),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+fungi_core_corn_T1_RA_composition
+
+#### T2 - Fungi ####
+fungi_core_T2_C_RA <- fungi.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T2" & Fungicide == "C") %>%
+  subset_taxa(OTU %in% core.rare.soy.T2[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+fungi_core_T2_C_RA$Fungicide <- "Control"
+
+fungi_core_T2_F_RA <- fungi.css.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Treatment == "T2" & Fungicide == "F") %>%
+  subset_taxa(OTU %in% core.rare.soy.T2[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+fungi_core_T2_F_RA$Fungicide <- "Fungicide"
+
+T2.combined <- rbind.data.frame(fungi_core_T2_C_RA, fungi_core_T2_F_RA)
+T2.combined$class.label <- ifelse(as.character(T2.combined$Class) %!in% class.label, "Other", as.character(T2.combined$Class))
+
+fungi_core_T2_RA_composition <- ggplot(T2.combined, aes(x = Fungicide, y = Abundance, fill = Class)) + 
+  facet_wrap(~Sample, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  ylab("Relative Abundance (%)") +
+  xlab("") +
+  scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], cbbPalette[6], "grey",  cbbPalette[7],  "purple")) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(name = "Fungicide",labels=c("Control" = "-", "Fungicide" = "+")) +
+  labs(fill = "Class") +
+  theme(legend.text = element_text(size = 10),
+          legend.key = element_blank(),
+          legend.title = element_text(size = 10),
+          legend.position = "none", 
+          strip.text.x = element_text(size = 10, vjust=2),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+fungi_core_T2_RA_composition
+
+# Corn
+
+
+#### T1 - Bacteria ####
+bacteria_corn_core_T1_C_RA <- bacteria.no.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Treatment == "T1" & Fungicide == "C") %>%
+  subset_taxa(OTU %in% core.rare.corn.T1.prok[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+bacteria_corn_core_T1_C_RA$Fungicide <- "Control"
+
+bacteria_corn_core_T1_F_RA <- bacteria.no.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Treatment == "T1" & Fungicide == "F") %>%
+  subset_taxa(OTU %in% core.rare.corn.T1.prok[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+bacteria_corn_core_T1_F_RA$Fungicide <- "Fungicide"
+
+T1.corn.bacteria.combined <- rbind.data.frame(bacteria_corn_core_T1_C_RA, bacteria_corn_core_T1_F_RA)
+#T1.corn.bacteria.combined$class.label <- ifelse(as.character(T1.corn.bacteria.combined$Genus) %!in% class.label, "Other", as.character(T1.corn.bacteria.combined$Genus))
+
+fungi_core_corn_T1_RA_composition <- ggplot(T1.corn.bacteria.combined, aes(x = Fungicide, y = Abundance, fill = Genus)) + 
+  facet_wrap(~Sample, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  ylab("Relative Abundance (%)") +
+  xlab("") +
+  #scale_fill_manual(values = c(cbbPalette[3], cbbPalette[5], cbbPalette[7], cbbPalette[6], "grey",  cbbPalette[7],  "purple")) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(name = "Fungicide",labels=c("Control" = "-", "Fungicide" = "+")) +
+  labs(fill = "Class") +
+  theme(legend.text = element_text(size = 10),
+          legend.key = element_blank(),
+          legend.title = element_text(size = 10),
+          legend.position = "right", 
+          strip.text.x = element_text(size = 10, vjust=2),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+fungi_core_corn_T1_RA_composition
+
+#### T2 - Bacteria ####
+bacteria_core_T2_C_RA <- bacteria.no.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Treatment == "T2" & Fungicide == "C") %>%
+  subset_taxa(OTU %in% core.rare.corn.T2.prok[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+bacteria_core_T2_C_RA$Fungicide <- "Control"
+
+bacteria_core_T2_F_RA <- bacteria.no.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Treatment == "T2" & Fungicide == "F") %>%
+  subset_taxa(OTU %in% core.rare.corn.T2.prok[[1]]) %>%
+  merge_samples("GrowthStage", fun = mean) %>%
+  tax_glom("Genus") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast() 
+
+bacteria_core_T2_F_RA$Fungicide <- "Fungicide"
+
+T2.combined.bacteria <- rbind.data.frame(bacteria_core_T2_C_RA, bacteria_core_T2_F_RA)
+#T2.combined.bacteria$class.label <- ifelse(as.character(T2.combined.bacteria$Class) %!in% class.label, "Other", as.character(T2.combined.bacteria$Class))
+
+bacteria_core_T2_RA_composition <- ggplot(T2.combined.bacteria, aes(x = Fungicide, y = Abundance, fill = Class)) + 
+  facet_wrap(~Sample, scales = "free_x") +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  ylab("Relative Abundance (%)") +
+  xlab("") +
+  scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], cbbPalette[6], "grey",  cbbPalette[7],  "purple")) + 
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_discrete(name = "Fungicide",labels=c("Control" = "-", "Fungicide" = "+")) +
+  labs(fill = "Class") +
+  theme(legend.text = element_text(size = 10),
+          legend.key = element_blank(),
+          legend.title = element_text(size = 10),
+          legend.position = "none", 
+          strip.text.x = element_text(size = 10, vjust=2),
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+bacteria_core_T2_RA_composition
+
+
+
+```
+
+### CORE Comparison 
+-T1 & T2 soybean
+-Corn and Soybean etc...
+```{r}
+# Similar OTUs with soybean phyllosphere fungi
+intersect(intersect(core.rare.soy.T1[[1]], core.rare.soy.T2[[1]]), intersect(core.rare.corn.T1[[1]], core.rare.corn.T2[[1]]))
+
+# Similar OTUs across corn and soybean bacteria phyllosphere 
+intersect(intersect(core.rare.soy.T1.prok[[1]], core.rare.soy.T2.prok[[1]]), intersect(core.rare.corn.T1.prok[[1]], core.rare.corn.T2.prok[[1]])) 
+
+soy.T1.fungicide <- unique(c(as.character(fungi_leaf_soy_R4_T1_sig), as.character(fungi_leaf_soy_R6_T1_sig)))
+taxonomy %>%
+  subset(OTU %in% intersect(soy.T1.fungicide, core.rare.soy.T1[[1]]))
+
+soy.T2.fungicide <- unique(c(as.character(fungi_leaf_soy_R4_T2_sig), as.character(fungi_leaf_soy_R6_T2_sig)))
+taxonomy %>%
+  subset(OTU %in% intersect(soy.T2.fungicide, core.rare.soy.T2[[1]]))
+
+corn.T1.fungicide <- unique(c(as.character(fungi_leaf_corn_V8_ANCOM_sig)))
+taxonomy %>%
+  subset(OTU %in% intersect(corn.T1.fungicide, core.rare.corn.T1[[1]]))
+
+corn.T2.fungicide <- unique(as.character(fungi_leaf_corn_V8_ANCOM_sig))
+taxonomy %>%
+  subset(OTU %in% intersect(corn.T2.fungicide, core.rare.corn.T2[[1]]))
+# Core Membership Soybean T1
+core.rare.soy.T1.taxa <- taxonomy %>%
+  subset(OTU %in% core.rare.soy.T1[[1]])
+occ50.rare.soy.T1.taxa <- taxonomy %>%
+  subset(OTU %in% core.rare.soy.T1[[4]]$otu[core.rare.soy.T1[[4]]$otu_occ > 0.5])
+occ50.rare.soy.T1.taxa <- taxonomy %>%
+  subset(OTU %in% core.rare.soy.T1[[4]]$otu[core.rare.soy.T1[[4]]$otu_occ > 0.5])
+
+saveRDS(core.rare.soy.T1[[1]], "soy_T1_core_fungal_otus.rds")
+saveRDS(occ50.rare.soy.T1.taxa, "occ50_rare_soy_T1_taxa.rds")
+
+core.rare.soy.T1.taxa.percent <- core.rare.soy.T1.taxa %>%
+  select(Class) %>%
+  table() %>%
+  as.data.frame() 
+core.rare.soy.T1.taxa.percent$percent <- 100*(core.rare.soy.T1.taxa.percent$Freq/sum(core.rare.soy.T1.taxa.percent$Freq))
+dplyr::arrange(core.rare.soy.T1.taxa.percent, by = desc(percent))
+
+# Core Membership Soybean T2
+core.rare.soy.T2.taxa <- taxonomy %>%
+  subset(OTU %in% core.rare.soy.T2[[1]])
+occ50.rare.soy.T2.taxa <- taxonomy %>%
+  subset(OTU %in% core.rare.soy.T2[[4]]$otu[core.rare.soy.T2[[4]]$otu_occ > 0.5])
+
+saveRDS(core.rare.soy.T2[[1]], "soy_T2_core_fungal_otus.rds")
+saveRDS(occ50.rare.soy.T2.taxa, "occ50.rare.soy.T2.taxa.rds")
+
+core.rare.soy.T2.taxa.percent <- core.rare.soy.T2.taxa %>%
+  select(Class) %>%
+  table() %>%
+  as.data.frame() 
+core.rare.soy.T2.taxa.percent$percent <- 100*(core.rare.soy.T2.taxa.percent$Freq/sum(core.rare.soy.T2.taxa.percent$Freq))
+dplyr::arrange(core.rare.soy.T2.taxa.percent, by = desc(percent))
+
+# Core Membership Corn T2
+core.rare.corn.T2.taxa <- taxonomy %>%
+  subset(OTU %in% core.rare.corn.T2[[1]])
+
+core.rare.corn.T2.taxa.percent <- core.rare.corn.T2.taxa %>%
+  select(Class) %>%
+  table() %>%
+  as.data.frame() 
+core.rare.corn.T2.taxa.percent$percent <- 100*(core.rare.corn.T2.taxa.percent$Freq/sum(core.rare.corn.T2.taxa.percent$Freq))
+dplyr::arrange(core.rare.corn.T2.taxa.percent, by = desc(percent))
+
+saveRDS(core.rare.corn.T2[[1]], "corn_T2_core_fungal_otus.rds")
+
+# Core Membership Corn T1
+core.rare.corn.T1.taxa <- taxonomy %>%
+  subset(OTU %in% core.rare.corn.T1[[1]])
+
+core.rare.corn.T1.taxa.percent <- core.rare.corn.T1.taxa %>%
+  select(Class) %>%
+  table() %>%
+  as.data.frame() 
+core.rare.corn.T1.taxa.percent$percent <- 100*(core.rare.corn.T1.taxa.percent$Freq/sum(core.rare.corn.T1.taxa.percent$Freq))
+dplyr::arrange(core.rare.corn.T1.taxa.percent, by = desc(percent))
+
+saveRDS(core.rare.corn.T1[[1]], "corn_T1_core_fungal_otus.rds")
+
+
+### Bacteria ###
+#T1
+core.rare.soy.T1.taxa.prok <- taxonomy.prok %>%
+  subset(OTU %in% core.rare.soy.T1.prok[[1]])
+occ50.rare.soy.T1.prok <- taxonomy.prok %>%
+  subset(OTU %in% core.rare.soy.T1.prok[[4]]$otu[core.rare.soy.T1.prok[[4]]$otu_occ > 0.5])
+
+saveRDS(core.rare.soy.T1.prok[[1]], "soy_T1_core_bacterial_otus.rds")
+saveRDS(occ50.rare.soy.T1.prok[[1]], "occ50_rare_soy_T1_prok.rds")
+
+core.rare.soy.T1.taxa.prok.percent <- core.rare.soy.T1.taxa.prok %>%
+  select(Class) %>%
+  table() %>%
+  as.data.frame() 
+core.rare.soy.T1.taxa.prok.percent$percent <- 100*(core.rare.soy.T1.taxa.prok.percent$Freq/sum(core.rare.soy.T1.taxa.prok.percent$Freq))
+dplyr::arrange(core.rare.soy.T1.taxa.prok.percent, by = desc(percent))
+
+#T2
+core.rare.soy.T2.taxa.prok <- taxonomy.prok %>%
+  subset(OTU %in% core.rare.soy.T2.prok[[1]])
+occ50.rare.soy.T2.prok <- taxonomy.prok %>%
+  subset(OTU %in% core.rare.soy.T2.prok[[4]]$otu[core.rare.soy.T2.prok[[4]]$otu_occ > 0.5])
+
+saveRDS(core.rare.soy.T2.prok[[1]], "soy_T2_core_bacterial_otus.rds")
+
+core.rare.soy.T2.taxa.prok.percent <- core.rare.soy.T2.taxa.prok %>%
+  select(Class) %>%
+  table() %>%
+  as.data.frame() 
+core.rare.soy.T2.taxa.prok.percent$percent <- 100*(core.rare.soy.T2.taxa.prok.percent$Freq/sum(core.rare.soy.T2.taxa.prok.percent$Freq))
+dplyr::arrange(core.rare.soy.T2.taxa.prok.percent, by = desc(percent))
+```
+
+Did fungicide change the core microbiome composition?
+```{r}
+fungi.norm.leaf.soy.T1.core <- fungi.CSS.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & GrowthStage == "V8") %>%
+  subset_taxa(OTU_ID %in% core.rare.corn.T2[[1]])
+
+bacteria.dist.bray = phyloseq::distance(fungi.norm.leaf.soy.T1.core, "bray") # create bray-curtis distance matrix
+
+  # Test different combinations of the adonis due to differential sums squares
+adonis2(bacteria.dist.bray~Fungicide*Treatment, as(sample_data(fungi.norm.leaf.soy.T1.core), "data.frame")) 
+```
+
+### Abundance occupancy function
+-Since I am not modeling the neutral model using the tyRa package, just getting the abundance and occupancy, I am using the CSS normalized reads since that is what all the rest of the analysis was based on. 
+-However, modeling the neutral model requires the data to be rarefied. 
+```{r}
+install_github("DanielSprockett/tyRa")
+library(tyRa)
+occ.abund <- function(phyloseq.object){
+  
+set.seed(19)
+rare.phyloseq.object <- rarefy_even_depth(phyloseq.object, replace=TRUE)
+  
+  spp.out <- tyRa::fit_sncm(spp = t(otu_table(rare.phyloseq.object)), pool=NULL)
+  
+taxonomy <- phyloseq.object %>%
+  tax_table() %>%
+  as("matrix") %>%
+  as_tibble() %>%
+  data.frame()
+
+spp.out$fitstats
+preds <- spp.out$predictions
+preds$OTU <- rownames(preds)
+preds2 <- left_join(preds, taxonomy, by = "OTU") 
+
+control.R4 <- ggplot() +
+  geom_line(color='grey', data=preds2, size=2, aes(y=freq.pred, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=preds2, aes(y=pred.upr, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=preds2, aes(y=pred.lwr, x=p)) +
+  
+  geom_point(preds2, mapping = aes(x = p, y = freq), shape = 21, fill = "grey", alpha = 0.5) + 
+   geom_point(preds2[preds2$Class == "Tremellomycetes",], mapping = aes(x = p, y = freq), shape = 21, fill = "red") + 
+geom_text_repel(preds2[preds2$Class == "Tremellomycetes" & preds2$freq > 0.75,], mapping = aes(x = p, y = freq, label = Label)) +
+  
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  scale_x_continuous(trans = "log10") 
+return_list <- list(preds2, control.R4)
+return(return_list)
+}
+
+### Soybean Fungi ####
+fungi.css.norm.leaf.soy.control.T1 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Fungicide == "C" & Treatment == "T1") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+p.soy.leaf.T1 <-occ.abund(fungi.css.norm.leaf.soy.control.T1)
+
+
+fungi.css.norm.leaf.soy.control.T2 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Fungicide == "C" & Treatment == "T2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+p.soy.leaf.T2 <-occ.abund(fungi.css.norm.leaf.soy.control.T2)
+
+### Soybean Bacteria ####
+bacteria.css.norm.leaf.soy.control.T1 <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Fungicide == "C" & Treatment == "T1") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+p.soy.leaf.bacteria.T1 <-occ.abund(bacteria.css.norm.leaf.soy.control.T1)
+
+ggplot() +
+  geom_line(color='grey', data=p.soy.leaf.bacteria.T1[[1]], size=2, aes(y=freq.pred, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.bacteria.T1[[1]], aes(y=pred.upr, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.bacteria.T1[[1]], aes(y=pred.lwr, x=p)) +
+  
+  geom_point(p.soy.leaf.bacteria.T1[[1]], mapping = aes(x = p, y = freq), shape = 21, fill = "grey", alpha = 0.5) + 
+   geom_point(p.soy.leaf.bacteria.T1[[1]][p.soy.leaf.bacteria.T1[[1]]$OTU %in% core.rare.soy.T1.prok[[1]],], mapping = aes(x = p, y = freq), shape = 21, fill = "red") + 
+geom_text_repel(p.soy.leaf.bacteria.T1[[1]][p.soy.leaf.bacteria.T1[[1]]$OTU %in% core.rare.soy.T1.prok[[1]],], mapping = aes(x = p, y = freq, label = Label)) +
+  
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  scale_x_continuous(trans = "log10") 
+
+
+bacteria.css.norm.leaf.soy.control.T2 <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & Fungicide == "C" & Treatment == "T2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+p.soy.leaf.bacteria.T2 <-occ.abund(bacteria.css.norm.leaf.soy.control.T2)
+
+ggplot() +
+  geom_line(color='grey', data=p.soy.leaf.bacteria.T2[[1]], size=2, aes(y=freq.pred, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.bacteria.T2[[1]], aes(y=pred.upr, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.bacteria.T2[[1]], aes(y=pred.lwr, x=p)) +
+  
+  geom_point(p.soy.leaf.bacteria.T2[[1]], mapping = aes(x = p, y = freq), shape = 21, fill = "grey", alpha = 0.5) + 
+   geom_point(p.soy.leaf.bacteria.T2[[1]][p.soy.leaf.bacteria.T2[[1]]$OTU %in% core.rare.soy.T2.prok[[1]],], mapping = aes(x = p, y = freq), shape = 21, fill = "red") + 
+geom_text_repel(p.soy.leaf.bacteria.T2[[1]][p.soy.leaf.bacteria.T2[[1]]$OTU %in% core.rare.soy.T2.prok[[1]],], mapping = aes(x = p, y = freq, label = Label)) +
+  
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  scale_x_continuous(trans = "log10")
+
+### Corn Fungi ####
+fungi.css.norm.leaf.corn.control.T1 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Fungicide == "C" & Treatment == "T1") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+p.corn.leaf.T1 <-occ.abund(fungi.css.norm.leaf.corn.control.T1)
+
+fungi.css.norm.leaf.corn.control.T2 <- fungi.no.norm.filt %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Fungicide == "C" & Treatment == "T2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+p.corn.leaf.T2 <- occ.abund(fungi.css.norm.leaf.corn.control.T2)
+
+### Corn Bacteria ####
+bacteria.css.norm.leaf.corn.control.T1 <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Fungicide == "C" & Treatment == "T1") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+p.corn.leaf.bacteria.T1 <-occ.abund(bacteria.css.norm.leaf.corn.control.T1)
+
+ggplot() +
+  geom_line(color='grey', data=p.corn.leaf.bacteria.T1[[1]], size=2, aes(y=freq.pred, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=p.corn.leaf.bacteria.T1[[1]], aes(y=pred.upr, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=p.corn.leaf.bacteria.T1[[1]], aes(y=pred.lwr, x=p)) +
+  
+  geom_point(p.corn.leaf.bacteria.T1[[1]], mapping = aes(x = p, y = freq), shape = 21, fill = "grey", alpha = 0.5) + 
+   geom_point(p.corn.leaf.bacteria.T1[[1]][p.corn.leaf.bacteria.T1[[1]]$OTU %in% core.rare.corn.T1.prok[[1]],], mapping = aes(x = p, y = freq), shape = 21, fill = "red") + 
+geom_text_repel(p.corn.leaf.bacteria.T1[[1]][p.corn.leaf.bacteria.T1[[1]]$OTU %in% core.rare.corn.T1.prok[[1]],], mapping = aes(x = p, y = freq, label = Label)) +
+  
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  scale_x_continuous(trans = "log10") 
+
+
+
+bacteria.css.norm.leaf.corn.control.T2 <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & Fungicide == "C" & Treatment == "T2") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+
+p.corn.leaf.bacteria.T2 <- occ.abund(bacteria.css.norm.leaf.corn.control.T2)
+
+ggplot() +
+  geom_line(color='grey', data=p.corn.leaf.bacteria.T2[[1]], size=2, aes(y=freq.pred, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=p.corn.leaf.bacteria.T2[[1]], aes(y=pred.upr, x=p)) +
+    geom_line(color='grey', lty='twodash', size=1, data=p.corn.leaf.bacteria.T2[[1]], aes(y=pred.lwr, x=p)) +
+  
+  geom_point(p.corn.leaf.bacteria.T2[[1]], mapping = aes(x = p, y = freq), shape = 21, fill = "grey", alpha = 0.5) + 
+   geom_point(p.corn.leaf.bacteria.T2[[1]][p.corn.leaf.bacteria.T2[[1]]$OTU %in% core.rare.corn.T2.prok[[1]],], mapping = aes(x = p, y = freq), shape = 21, fill = "red") + 
+geom_text_repel(p.corn.leaf.bacteria.T2[[1]][p.corn.leaf.bacteria.T2[[1]]$OTU %in% core.rare.corn.T2.prok[[1]],], mapping = aes(x = p, y = freq, label = Label)) +
+  
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  scale_x_continuous(trans = "log10") 
+```
+
+### Local extinctions and recovered and non-recovered OTUs
+
+OTUs that decreased or increased in abundance
+```{r}
+# No OTUs increased in abundance in corn
+corn.decrease <- unique(mean.rel.abund.fungicide.over.time2.corn$OTU[mean.rel.abund.fungicide.over.time2.corn$Direction == "Decrease"])
+
+soy.increase.T1 <- unique(mean.rel.abund.fungicide.over.time2.soy$OTU[mean.rel.abund.fungicide.over.time2.soy$Direction == "Increase" & mean.rel.abund.fungicide.over.time2.soy$Treatment == "T1"])
+
+soy.decrease.T1 <- unique(mean.rel.abund.fungicide.over.time2.soy$OTU[mean.rel.abund.fungicide.over.time2.soy$Direction == "Decrease" & mean.rel.abund.fungicide.over.time2.soy$OTU %!in%  locally.extinct.fungicide.soy.T1 & mean.rel.abund.fungicide.over.time2.soy$Treatment == "T1"])
+
+soy.increase.T2 <- unique(mean.rel.abund.fungicide.over.time2.soy$OTU[mean.rel.abund.fungicide.over.time2.soy$Direction == "Increase" & mean.rel.abund.fungicide.over.time2.soy$Treatment == "T2"])
+
+soy.decrease.T2 <- unique(mean.rel.abund.fungicide.over.time2.soy$OTU[mean.rel.abund.fungicide.over.time2.soy$Direction == "Decrease" & mean.rel.abund.fungicide.over.time2.soy$OTU %!in%  locally.extinct.fungicide.soy.T2 & mean.rel.abund.fungicide.over.time2.soy$Treatment == "T2"])
+```
+
+### Recovered vs. non-recovered OTUs
+
+## Occupancy abudance plots - Fungi
+```{r}
+p.corn.leaf.T1.plot <- p.corn.leaf.T1[[1]]
+p.corn.leaf.T2.plot <- p.corn.leaf.T2[[1]]
+p.soy.leaf.T1.plot <- p.soy.leaf.T1[[1]]
+p.soy.leaf.T2.plot <- p.soy.leaf.T2[[1]]
+
+### OCC-ABUND plot Corn Phylosphere Fungi T1 ####
+p.corn.leaf.T1.plot$LocalExtinction <- "NotLocalExtinct"
+p.corn.leaf.T1.plot$increaseXdecrease <- ifelse(p.corn.leaf.T1.plot$OTU %in% corn.increase, "Increase", ifelse(
+  p.corn.leaf.T1.plot$OTU %in% corn.decrease, "Decrease", "Not Affected"))
+p.corn.leaf.T1.plot$core <- ifelse(p.corn.leaf.T1.plot$OTU %in% core.rare.corn.T1[[1]], "Core", "NotCore")
+p.corn.leaf.T1.plot$increaseXdecreaseXCore <- interaction(p.corn.leaf.T1.plot$increaseXdecrease, p.corn.leaf.T1.plot$core)
+class.label <- c("Agaricomycetes", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+p.corn.leaf.T1.plot$class.label <- ifelse(p.corn.leaf.T1.plot$Class %!in% class.label, "Other", p.corn.leaf.T1.plot$Class)
+
+sig.different.corn.abund.occ.T1 <- ggplot() +
+  #geom_line(color='grey', data=p.soy.leaf.T1.plot, size=2, aes(y=freq.pred, x=log10(p))) +
+  #geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.T1.plot, aes(y=pred.upr, x=log10(p))) +
+  #geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.T1.plot, aes(y=pred.lwr, x=log10(p))) +
+  #geom_point(p.soy.leaf.T1.plot, mapping = aes(x = p, y = freq, shape = LocalExtinction), size = 2, fill = "grey", alpha = 0.3) + 
+  geom_point(data = p.corn.leaf.T1.plot[p.corn.leaf.T1.plot$increaseXdecrease == "Not Affected" & p.corn.leaf.T1.plot$core != "Core",], mapping = aes(x = log10(p), y = freq), shape = 1, size = 1, alpha = 0.5, color = "grey") + 
+  geom_jitter(data = p.corn.leaf.T1.plot[p.corn.leaf.T1.plot$increaseXdecrease != "Not Affected" & p.corn.leaf.T1.plot$core != "Core",], mapping = aes(x = log10(p), y = freq, color = class.label, shape = increaseXdecrease), size = 2, alpha = 0.8) +
+  geom_point(data = p.corn.leaf.T1.plot[p.corn.leaf.T1.plot$increaseXdecrease == "Not Affected" & p.corn.leaf.T1.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, color = class.label), shape = 19, size = 3, alpha = 0.8) +
+  geom_point(data = p.corn.leaf.T1.plot[p.corn.leaf.T1.plot$increaseXdecrease != "Not Affected" & p.corn.leaf.T1.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, color = class.label, fill = class.label, shape = increaseXdecrease), size = 3, alpha = 0.8) +
+  #geom_text_repel(p.corn.leaf.T1.plot[p.corn.leaf.T1.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, label = Genus, color = class.label), size = 2) +
+  #geom_text_repel(p.soy.leaf.T1.plot[p.soy.leaf.T1.plot$LocalExtinction == "LocalExtinction",], mapping = aes(x = p, y = freq, label = Label, fill = class.label), size = 2) +
+  scale_color_manual(values = c(cbbPalette[1], cbbPalette[3], cbbPalette[5], cbbPalette[6], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  scale_fill_manual(values = c(cbbPalette[1],cbbPalette[7], "purple")) + 
+  scale_shape_manual(values = c(25, 4)) +
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  #scale_x_continuous(trans = "log10") + 
+  #ggtitle("Corn Leaf - Conventional") +
+  theme(legend.title = element_blank()) + 
+  theme_bw()
+
+### OCC-ABUND plot Corn Phylosphere Fungi T2 ####
+
+p.corn.leaf.T2.plot$LocalExtinction <- "NotLocalExtinct"
+p.corn.leaf.T2.plot$increaseXdecrease <- ifelse(p.corn.leaf.T2.plot$OTU %in% corn.increase, "Increase", ifelse(
+  p.corn.leaf.T2.plot$OTU %in% corn.decrease, "Decrease", ifelse(
+    p.corn.leaf.T2.plot$OTU %in% locally.extinct.fungicide.corn, "Local Exctinction", "Not Affected")))
+p.corn.leaf.T2.plot$core <- ifelse(p.corn.leaf.T2.plot$OTU %in% core.rare.corn.T2[[1]], "Core", "NotCore")
+p.corn.leaf.T2.plot$increaseXdecreaseXCore <- interaction(p.corn.leaf.T2.plot$increaseXdecrease, p.corn.leaf.T2.plot$core)
+class.label <- c("Agaricomycetes", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+p.corn.leaf.T2.plot$class.label <- ifelse(p.corn.leaf.T2.plot$Class %!in% class.label, "Other", p.corn.leaf.T2.plot$Class)
+
+sig.different.corn.abund.occ.T2 <- ggplot() +
+  #geom_line(color='grey', data=p.soy.leaf.T2.plot, size=2, aes(y=freq.pred, x=p)) +
+  #geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.T2.plot, aes(y=pred.upr, x=p)) +
+  #geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.T2.plot, aes(y=pred.lwr, x=p)) +
+  #geom_point(p.soy.leaf.T2.plot, mapping = aes(x = p, y = freq, shape = LocalExtinction), size = 2, fill = "grey", alpha = 0.3) + 
+  geom_point(data = p.corn.leaf.T2.plot[p.corn.leaf.T2.plot$increaseXdecrease == "Not Affected" & p.corn.leaf.T2.plot$core != "Core",], mapping = aes(x = log10(p), y = freq), shape = 1, size = 1, alpha = 0.5, color = "grey") + 
+  geom_jitter(data = p.corn.leaf.T2.plot[p.corn.leaf.T2.plot$increaseXdecrease != "Not Affected" & p.corn.leaf.T2.plot$core != "Core",], mapping = aes(x = log10(p), y = freq, color = class.label, shape = increaseXdecrease), size = 2, alpha = 0.8) +
+  geom_point(data = p.corn.leaf.T2.plot[p.corn.leaf.T2.plot$increaseXdecrease == "Not Affected" & p.corn.leaf.T2.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, color = class.label), shape = 19, size = 3, alpha = 0.8) +
+  geom_point(data = p.corn.leaf.T2.plot[p.corn.leaf.T2.plot$increaseXdecrease != "Not Affected" & p.corn.leaf.T2.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, color = class.label, fill = class.label, shape = increaseXdecrease), size = 3, alpha = 0.8) +
+  #geom_text_repel(p.corn.leaf.T2.plot[p.corn.leaf.T2.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, label = Genus, color = class.label), size = 2) +
+  #geom_text_repel(p.soy.leaf.T2.plot[p.soy.leaf.T2.plot$LocalExtinction == "LocalExtinction",], mapping = aes(x = p, y = freq, label = Label, fill = class.label), size = 2) +
+  scale_color_manual(values = c(cbbPalette[1], cbbPalette[3], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  scale_fill_manual(values = c("grey",cbbPalette[7], "purple")) + 
+  scale_shape_manual(values = c(25, 4)) +
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  #scale_x_continuous(trans = "log10") + 
+  #ggtitle("Corn Leaf - No-till") +
+  theme(legend.title = element_blank()) + 
+  theme_bw()
+
+
+### OCC-ABUND plot Soybean Phylosphere Fungi - T1 ####
+p.soy.leaf.T1.plot$LocalExtinction <- ifelse(p.soy.leaf.T1.plot$OTU %in% locally.extinct.fungicide.soy.T1, "LocalExtinction", "NotLocalExtinct")
+p.soy.leaf.T1.plot$increaseXdecrease <- ifelse(p.soy.leaf.T1.plot$OTU %in% soy.increase.T1, "Increase", ifelse(
+  p.soy.leaf.T1.plot$OTU %in% soy.decrease.T1, "Decrease", ifelse(
+    p.soy.leaf.T1.plot$OTU %in% locally.extinct.fungicide.soy.T1, "Local Exctinction", "Not Affected")))
+p.soy.leaf.T1.plot$core <- ifelse(p.soy.leaf.T1.plot$OTU %in% core.rare.soy.T1[[1]], "Core", "NotCore")
+p.soy.leaf.T1.plot$increaseXdecreaseXCore <- interaction(p.soy.leaf.T1.plot$increaseXdecrease, p.soy.leaf.T1.plot$core)
+class.label <- c("Agaricomycetes", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+p.soy.leaf.T1.plot$class.label <- ifelse(p.soy.leaf.T1.plot$Class %!in% class.label, "Other", p.soy.leaf.T1.plot$Class)
+
+sig.different.soy.T1.abund.occ <- ggplot() +
+  #geom_line(color='grey', data=p.soy.leaf.T1.plot, size=2, aes(y=freq.pred, x=log10(p))) +
+  #geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.T1.plot, aes(y=pred.upr, x=log10(p))) +
+  #geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.T1.plot, aes(y=pred.lwr, x=log10(p))) +
+  #geom_point(p.soy.leaf.T1.plot, mapping = aes(x = p, y = freq, shape = LocalExtinction), size = 2, fill = "grey", alpha = 0.3) + 
+  geom_point(data = p.soy.leaf.T1.plot[p.soy.leaf.T1.plot$increaseXdecrease == "Not Affected" & p.soy.leaf.T1.plot$core != "Core",], mapping = aes(x = log10(p), y = freq), shape = 1, size = 1, alpha = 0.5, color = "grey") + 
+  geom_point(data = p.soy.leaf.T1.plot[p.soy.leaf.T1.plot$increaseXdecrease != "Not Affected" & p.soy.leaf.T1.plot$core != "Core",], mapping = aes(x = log10(p), y = freq, color = class.label, shape = increaseXdecrease), size = 2, alpha = 0.8) +
+  geom_point(data = p.soy.leaf.T1.plot[p.soy.leaf.T1.plot$increaseXdecrease == "Not Affected" & p.soy.leaf.T1.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, color = class.label), shape = 19, size = 3, alpha = 0.8) +
+  geom_point(data = p.soy.leaf.T1.plot[p.soy.leaf.T1.plot$increaseXdecrease != "Not Affected" & p.soy.leaf.T1.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, color = class.label, fill = class.label, shape = increaseXdecrease), size = 3, alpha = 0.8) +
+  #geom_text_repel(p.soy.leaf.T1.plot[p.soy.leaf.T1.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, label = Genus, color = class.label), size = 2) +
+  #geom_text_repel(p.soy.leaf.T1.plot[p.soy.leaf.T1.plot$LocalExtinction == "LocalExtinction",], mapping = aes(x = log10(p), y = freq, label = Label), size = 2) +
+  scale_color_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  scale_fill_manual(values = c(cbbPalette[3], cbbPalette[5], cbbPalette[7])) + 
+  scale_shape_manual(values = c(25, 24, 4)) +
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  #scale_x_continuous(trans = "log10") + 
+  #ggtitle("Soybean Leaf - Conventional") +
+  theme(legend.title = element_blank()) +
+  theme_bw()
+
+### OCC-ABUND plot Soybean Phylosphere Fungi - T2 ####
+p.soy.leaf.T2.plot$LocalExtinction <- ifelse(p.soy.leaf.T2.plot$OTU %in% locally.extinct.fungicide.soy.T2, "LocalExtinction", "NotLocalExtinct")
+p.soy.leaf.T2.plot$increaseXdecrease <- ifelse(p.soy.leaf.T2.plot$OTU %in% soy.increase.T1, "Increase", ifelse(
+  p.soy.leaf.T2.plot$OTU %in% soy.decrease.T2, "Decrease", ifelse(
+    p.soy.leaf.T2.plot$OTU %in% locally.extinct.fungicide.soy.T2, "Local Exctinction", "Not Affected")))
+p.soy.leaf.T2.plot$core <- ifelse(p.soy.leaf.T2.plot$OTU %in% core.rare.soy.T2[[1]], "Core", "NotCore")
+p.soy.leaf.T2.plot$increaseXdecreaseXCore <- interaction(p.soy.leaf.T2.plot$increaseXdecrease, p.soy.leaf.T2.plot$core)
+class.label <- c("Agaricomycetes", "Agaricostilbomycetes", "Dothideomycetes", "Tremellomycetes", "Sordariomycetes", "Eurotiomycetes", "Exobasidiomycetes", "Microbotryomycetes", "unidentified")
+p.soy.leaf.T2.plot$class.label <- ifelse(p.soy.leaf.T2.plot$Class %!in% class.label, "Other", p.soy.leaf.T2.plot$Class)
+
+sig.different.soy.T2.abund.occ <- ggplot() +
+  #geom_line(color='grey', data=p.soy.leaf.T1.plot, size=2, aes(y=freq.pred, x=log10(p))) +
+  #geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.T1.plot, aes(y=pred.upr, x=log10(p))) +
+  #geom_line(color='grey', lty='twodash', size=1, data=p.soy.leaf.T1.plot, aes(y=pred.lwr, x=log10(p))) +
+  #geom_point(p.soy.leaf.T1.plot, mapping = aes(x = p, y = freq, shape = LocalExtinction), size = 2, fill = "grey", alpha = 0.3) + 
+  geom_point(data = p.soy.leaf.T2.plot[p.soy.leaf.T2.plot$increaseXdecrease == "Not Affected" & p.soy.leaf.T2.plot$core != "Core",], mapping = aes(x = log10(p), y = freq), shape = 1, size = 1, alpha = 0.5, color = "grey") + 
+  geom_point(data = p.soy.leaf.T2.plot[p.soy.leaf.T2.plot$increaseXdecrease != "Not Affected" & p.soy.leaf.T2.plot$core != "Core",], mapping = aes(x = log10(p), y = freq, color = class.label, shape = increaseXdecrease), size = 2, alpha = 0.8) +
+  geom_point(data = p.soy.leaf.T2.plot[p.soy.leaf.T2.plot$increaseXdecrease == "Not Affected" & p.soy.leaf.T2.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, color = class.label), shape = 19, size = 3, alpha = 0.8) +
+  geom_point(data = p.soy.leaf.T2.plot[p.soy.leaf.T2.plot$increaseXdecrease != "Not Affected" & p.soy.leaf.T2.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, color = class.label, fill = class.label, shape = increaseXdecrease), size = 3, alpha = 0.8) +
+  #geom_text_repel(p.soy.leaf.T2.plot[p.soy.leaf.T2.plot$core == "Core",], mapping = aes(x = log10(p), y = freq, label = Genus, color = class.label), size = 2) +
+  #geom_text_repel(p.soy.leaf.T1.plot[p.soy.leaf.T1.plot$LocalExtinction == "LocalExtinction",], mapping = aes(x = p, y = freq, label = Label, fill = class.label), size = 2) +
+  scale_color_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) +
+  scale_fill_manual(values = c(cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[7])) + 
+  scale_shape_manual(values = c(25, 24, 4)) +
+  ylab("Occupancy") + 
+  xlab("log10(mean relative abundance)") + 
+  #scale_x_continuous(trans = "log10") + 
+  #ggtitle("Soybean Leaf - No-till") +
+  theme(legend.title = element_blank()) + 
+  theme_bw()
+``` 
+
+```{r}
+ggplot(mean.rel.abund.fungicide.over.time2.soy[mean.rel.abund.fungicide.over.time2.soy$Genus == "Hannaella",], aes(x = GrowthStage, y = diff, color = Label)) + 
+  stat_summary(fun.y=mean,position=position_dodge(width=0.95),geom="line") +
+  stat_summary(fun.data = mean_se,position=position_dodge(width=0.95), geom = "errorbar", width = 0.5)
+```
+
+
+
+```{r}
+ggpubr::ggarrange(sig.different.soy.T1.abund.occ,
+                  sig.different.soy.T2.abund.occ, 
+                  sig.different.corn.abund.occ.T1,
+                  sig.different.corn.abund.occ.T2,
+                  common.legend = T, nrow = 4, ncol = 1)
+
+ggpubr::ggarrange(Fig.X.Soy.Composition.ANCOM.T1,
+                  Fig.X.Soy.Composition.ANCOM.T2,
+                 Fig.X.Corn.Composition.ANCOM.T1,
+                  Fig.X.Corn.Composition.ANCOM.T2,
+                 common.legend = T, nrow = 4, ncol = 1)
+```
+
+

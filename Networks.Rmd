@@ -1,0 +1,2725 @@
+---
+title: "Networks"
+author: "Zachary Noel"
+date: "6/3/2020"
+output: html_document
+---
+
+```{r SOURCE}
+source('functions_themes.R')
+```
+
+```{r setup, include=FALSE}
+#source('http://bioconductor.org/biocLite.R')
+#biocLite('phyloseq')
+library(phyloseq)
+library(decontam)
+#browseVignettes("phyloseq")
+library(devtools)
+install_github("zdk123/SpiecEasi")
+library(SpiecEasi)
+packages <- c("biomformat", "qiimer", "MASS", "ape", "ggplot2", "plyr", "indicspecies", "labdsv", "dplyr", "reshape", "vegan", "metacoder", "lme4", "lsmeans", "ggpmisc", "ggpubr", "tidyverse", "doParallel", "DT", "exactRankTests", "foreach", "Rcpp", "shiny", "coin", "igraph", "SpiecEasi", "ggsci", "RCy3", "ggrepel", "cowplot", "ggalt", "ggfortify", "emmeans", "data.table", "randomForest", "rfUtilities", "caret", "tidyr")
+ipak(packages)
+
+packageVersion("vegan")
+packageVersion('phyloseq')
+
+#install.packages("remotes")
+#remotes::install_github("DanielSprockett/reltools")
+library(reltools)
+#install.packages("minpack.lm")
+library(minpack.lm)
+#Models for the whole community
+#install.packages("devtools")
+library(devtools)
+#install_github("DanielSprockett/tyRa")
+#install.packages("Hmisc")
+library(Hmisc)
+library(Biostrings)
+library(ggforce)
+library(cowplot)
+library(randomForest)
+library(rfUtilities) # to test model significance
+library(caret) # to get leave-one-out cross-validation accuracies and also contains the nearZeroVar function 
+library(NetworkExtinction)
+library(ggraph)
+library(tidygraph)
+```
+
+## FUNGI CSS NORM and Non-normalized RDS
+Save the fungi phyloseq object as an RDS file to load faster in future.
+```{r FUNGI CSS NORM - RDS}
+# Restore the object
+fungi.no.norm <- readRDS(file = "Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm.rds") # need this for rarefying and core membership
+fungi.css.norm <- readRDS(file = "Fungicide_Fungi_RootsAndLeaves_10000seqMin_CSSNorm.rds") # need this for plotting abundance-occupancy 
+
+fungi.CSS.norm.filt <- readRDS(file = "physeq_fungi_CSS_filt_tax.rds")
+head(fungi.CSS.norm.filt@tax_table)
+
+fungi.no.norm.filt <- readRDS(file = "physeq_fungi_nonorm_filt_tax.rds")
+head(fungi.no.norm.filt@tax_table)
+```
+
+## PROKARYOTE CSS NORM and Non-normalized RDS
+```{r}
+# Restore the object
+bacteria.no.norm <- readRDS(file = "Fungicide_Bacteria_RootsAndLeaves_10000readsmin_nonorm.rds")
+# Restore the object
+bacteria.css.norm <- readRDS(file = "Fungicide_Bacteria_RootsAndLeaves_10000seqMin_CSSNorm.rds")
+
+# Restore the object
+bacteria.no.norm.filt <- readRDS("physeq_prok_nonorm_filt_tax.rds")
+bacteria.css.norm <- readRDS(file = "physeq_prok_CSS_filt_tax.rds")
+```
+
+# NETWORKS 
+- The input data for these networks is the fungi.no.norm or the prok.no.norm
+- These are datasets with at least 1000 reads, most soybean leaf samples passed this filter 
+- samples that did not sequence well enough to be inlcuded and need to be dropped for this analysis = 
+      T2R6FBR3L in fungal database (R3)
+      T2R1FCR6L in prokaryote database (R6)
+      
+- Spiec Easi does its own normalization procedure so the input is raw counts 
+- However we will have to take out rare taxa with large variation 
+- I am going to make a large network and pull out only the OTUs present in samples I want to analyse 
+- This meta-network aproach was done in Yang et al. 2019
+## META-NETWORK
+
+### Networks based on splitting each growth stage fungicide combo, then subgraphs by management
+
+## One big meta-network Soybean
+-has to be done on the HPCC - I am doing the same filtering as the ANCOM analysis, (i.e., mean RA > 1-5 and with OTUs that had less than 5% occupancy)
+```{r}
+remotes::install_github("schuyler-smith/phyloschuyler")
+library(phylosmith)
+fungi.no.norm <- phylosmith::set_sample_order(fungi.no.norm.filt, "SampleID")
+bacteria.no.norm <- phylosmith::set_sample_order(bacteria.no.norm.filt, "SampleID")
+
+##### fungi Subset OTUs with mean RA less than 1-5 soybean  ######
+fungi.names.rare <- fungi.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & SampleID != "T2R6FBR3L") %>%
+  phyloseq::transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  phyloseq::filter_taxa(function(x) mean(x) > 1e-4, TRUE) %>% 
+  taxa_names()
+
+# Take out the sample that is not present in the bacterial library 
+fungi_leaf_soy <- fungi.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & SampleID != "T2R6FBR3L")
+
+# Subset Samples 
+fungi_leaf_soy <- prune_taxa(fungi.names.rare, fungi_leaf_soy) # remove the taxa below 10-5 
+saveRDS(fungi_leaf_soy, "NetworkRDS/Input/fungi_leaf_soy.RDS")
+
+##### bacteria Subset OTUs with mean RA less than 1-5 soybean ######
+prok.names.rare <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & SampleID != "T2R1FCR6L") %>%
+  phyloseq::transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  phyloseq::filter_taxa(function(x) mean(x) > 1e-4, TRUE) %>%
+  taxa_names()
+
+prok_leaf_soy <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & SampleID != "T2R1FCR6L")
+
+# Subset Samples 
+prok_leaf_soy <- prune_taxa(prok.names.rare, prok_leaf_soy) # remove the taxa below 10-5 
+saveRDS(prok_leaf_soy, "NetworkRDS/Input/prok_leaf_soy.RDS")
+
+##### fungi Subset OTUs with mean RA less than 1-5 corn  ######
+fungi.samples.take.out.corn <- c("Corn2017LeafObjective2Collection1T1R1CBA3", "Corn2017LeafObjective2Collection1T2R1FBE6",
+"Corn2017LeafObjective2Collection1T2R2FAA7", "Corn2017LeafObjective2Collection2T2R6FCE2",
+"Corn2017LeafObjective2Collection3T1R5FCB5")
+
+fungi.names.rare <- fungi.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & SampleID %!in% fungi.samples.take.out.corn) %>%
+  phyloseq::transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  phyloseq::filter_taxa(function(x) mean(x) > 1e-4, TRUE) %>% 
+  taxa_names()
+
+# Take out the sample that is not present in the bacterial library 
+fungi_leaf_corn <- fungi.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn" & SampleID %!in% fungi.samples.take.out.corn)
+
+
+# Subset Samples 
+fungi_leaf_corn <- prune_taxa(fungi.names.rare, fungi_leaf_corn) # remove the taxa below 10-5 
+
+
+##### bacteria Subset OTUs with mean RA less than 1-5 corn ######
+prok.names.rare <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn") %>%
+  phyloseq::transform_sample_counts(function(x) {x/sum(x)} ) %>%
+  phyloseq::filter_taxa(function(x) mean(x) > 1e-4, TRUE) %>%
+  taxa_names()
+
+prok_leaf_corn <- bacteria.no.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn")
+
+# Subset Samples 
+prok_leaf_corn <- prune_taxa(prok.names.rare, prok_leaf_corn) # remove the taxa below 10-5 
+
+all.equal(sample_names(fungi_leaf_corn), sample_names(prok_leaf_corn))
+
+saveRDS(fungi_leaf_corn, "NetworkRDS/Input/fungi_leaf_corn.RDS")
+saveRDS(prok_leaf_corn, "NetworkRDS/Input/prok_leaf_corn.RDS")
+```
+
+- This is the code that was run on the high-performance computer. I would not recommend you run this code locally... 
+```{r}
+spiec.easi.network <- function(prok.phyloseq, fungi.phyloseq){
+  set.seed(12324)
+spiec_output <- spiec.easi(list(prok.phyloseq, fungi.phyloseq), method='mb', lambda.min.ratio=1e-2, nlambda=100, pulsar.params=list(thresh = 0.05, seed = 10020))
+stab <- getStability(spiec_output) # 0.0479 - good
+soy_net_weights <- symBeta(getOptBeta(spiec_output), mode="maxabs")
+weights <- Matrix::summary(t(soy_net_weights))[,3]
+names_taxa_net <- c(taxa_names(prok.phyloseq), taxa_names(fungi.phyloseq))
+nat.con <- pulsar::natural.connectivity(getRefit(spiec_output))
+graph.disimilarity <- as.matrix(pulsar::graph.diss(getRefit(spiec_output)))
+spiec_output_graph <- adj2igraph(getRefit(spiec_output),
+                                    edge.attr = list(weight=weights),
+                                    vertex.attr = list(name=names_taxa_net))
+
+degree.distribution <- data.frame(degree(spiec_output_graph)); colnames(degree.distribution) <- "degree"
+#degree.distribution$GrowthStage <- as.character(GrowthStage)
+#degree.distribution$Fungicide <- as.character(Fungicide)
+
+return.list <- list(igraph.object = spiec_output_graph, stability = stab, degree_dist = degree.distribution, natural.connect = nat.con, graph.disim = graph.disimilarity)
+return(return.list)
+}
+
+#meta.net <- spiec.easi.network(prok_leaf_soy, fungi_leaf_soy)
+#meta.net$stability
+```
+
+## Load in the Meta-Network objects
+- Load in the meta.net object from the hpcc
+```{r}
+meta.net.soy <- readRDS("NetworkRDS/Output/soy_leaf_network_112920_1-4filter.rds")
+meta.net.soy$igraph.object
+
+meta.net.corn <- readRDS("NetworkRDS/Output/corn_leaf_network_0112920_1-4filter.rds")
+meta.net.corn$igraph.object
+```
+
+## Loading in Metadata associated with each OTU such as, taxonomy, differential abundance, core membership, relative abundance etc. 
+FULL Taxonomy lists
+```{r}
+fungi.taxonomy <- tax_table(fungi.no.norm) %>%
+  as("matrix") %>%
+  tibble::as_tibble() %>%
+  dplyr::select(OTU_ID, Kingdom, Phylum, Class, Order, Family, Genus, BestMatch, Taxonomy)
+bacteria.taxonomy <- tax_table(bacteria.no.norm) %>%
+  as("matrix") %>%
+  tibble::as_tibble() %>%
+  dplyr::select(OTU_ID, Kingdom, Phylum, Class, Order, Family, Genus, BestMatch, Taxonomy)
+
+taxonomy.combined <- rbind.data.frame(fungi.taxonomy, bacteria.taxonomy)
+```
+
+-Core membership across time and space
+
+Missing corn bacteria leaves and corn T1 core fungi
+```{r}
+# Fungi Soy Leaves 
+soy_T1_core_fungi_otus <- readRDS("soy_T1_core_fungal_otus.rds")
+soy_T2_core_fungi_otus <- readRDS("soy_T2_core_fungal_otus.rds")
+
+# Fungi Corn Leaves
+corn_T1_core_fungi_otus <- readRDS("corn_T1_core_fungal_otus.rds")
+corn_T2_core_fungi_otus <- readRDS("corn_T2_core_fungal_otus.rds")
+
+# Bacteria Soy Leaves
+soy_T1_core_bacterial_otus <- readRDS("soy_T1_core_bacterial_otus.rds")
+soy_T2_core_bacterial_otus <- readRDS("soy_T2_core_bacterial_otus.rds")
+
+# Bacteria Corn Leaves
+
+
+core.T1.combined <- c(soy_T1_core_fungi_otus, soy_T1_core_bacterial_otus)
+core_labels_T1 <- taxonomy.combined$BestMatch[taxonomy.combined$OTU_ID %in% core.T1.combined] 
+
+core.T2.combined <- c(soy_T2_core_fungi_otus, soy_T2_core_bacterial_otus)
+core_labels_T2 <- taxonomy.combined$BestMatch[taxonomy.combined$OTU_ID %in% core.T2.combined] 
+
+taxonomy.combined %>%
+  subset(Label %in% core_labels_T2) %>%
+  write.csv("soy_T2_core_otus.csv")
+
+taxonomy.combined %>%
+  subset(Label %in% core_labels_T1) %>%
+  write.csv("soy_T1_core_otus.csv")
+```
+
+-Relative abundance of each OTU
+```{r}
+#### getting the mean relative abundance of each fungal OTU ####
+fungi_obj2.ra <- fungi.no.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast()                                      # Melt to long format
+mean.rel.abund.fungi <- fungi_obj2.ra %>% 
+  group_by(OTU) %>% 
+  nest() %>%
+  mutate(Kingdom = purrr::map(data, ~.x$Kingdom[[1]])) %>%
+  mutate(Phylum = purrr::map(data, ~.x$Phylum[[1]])) %>%
+  mutate(Class = purrr::map(data, ~.x$Class[[1]])) %>%
+  mutate(Order = purrr::map(data, ~.x$Order[[1]])) %>%
+  mutate(Family = purrr::map(data, ~.x$Family[[1]])) %>%
+  mutate(Genus = purrr::map(data, ~.x$Genus[[1]])) %>%
+  mutate(BestMatch = purrr::map(data, ~.x$BestMatch[[1]])) %>%
+  mutate(Taxonomy = purrr::map(data, ~.x$Taxonomy[[1]])) %>%
+  mutate(mean.relabund = purrr::map(data,~mean(.$Abundance*100))) %>%
+  mutate(SE.relabund = purrr::map(data,~sd(.$Abundance*100)/sqrt(length(.$Abundance*100)))) %>%
+  unnest(mean.relabund, SE.relabund, Kingdom, Phylum, Class, Order, Family, Genus, BestMatch, Taxonomy) %>%
+  dplyr::select(OTU, mean.relabund, SE.relabund, Kingdom, Phylum, Class, Order, Family, Genus, BestMatch, Taxonomy)
+
+#### getting the mean relative abundance of each bacterial OTU ####
+prok_obj2.ra <- bacteria.no.norm %>%   
+  subset_samples(Compartment == "Leaf" & Crop == "Soy") %>%
+  transform_sample_counts(function(x) {x/sum(x)} ) %>% # Transform to rel. abundance
+  psmelt.fast()                                      # Melt to long format
+mean.rel.abund.prok <- prok_obj2.ra %>% 
+  group_by(OTU) %>% 
+  nest() %>%
+   mutate(Kingdom = purrr::map(data, ~.x$Kingdom[[1]])) %>%
+  mutate(Phylum = purrr::map(data, ~.x$Phylum[[1]])) %>%
+  mutate(Class = purrr::map(data, ~.x$Class[[1]])) %>%
+  mutate(Order = purrr::map(data, ~.x$Order[[1]])) %>%
+  mutate(Family = purrr::map(data, ~.x$Family[[1]])) %>%
+  mutate(Genus = purrr::map(data, ~.x$Genus[[1]])) %>%
+  mutate(BestMatch = purrr::map(data, ~.x$BestMatch[[1]])) %>%
+  mutate(Taxonomy = purrr::map(data, ~.x$Taxonomy[[1]])) %>%
+  mutate(mean.relabund = purrr::map(data,~mean(.$Abundance*100))) %>%
+  mutate(SE.relabund = purrr::map(data,~sd(.$Abundance*100)/sqrt(length(.$Abundance*100)))) %>%
+  unnest(mean.relabund, SE.relabund, Kingdom, Phylum, Class, Order, Family, Genus, BestMatch, Taxonomy) %>%
+  dplyr::select(OTU, mean.relabund, SE.relabund, Kingdom, Phylum, Class, Order, Family, Genus, BestMatch, Taxonomy)
+
+#### Join the abundances together ####
+mean.rel.abund.combined <- rbind.data.frame(mean.rel.abund.prok, mean.rel.abund.fungi)
+```
+
+ANCOM - differentially abundant OTUs
+-There was no evidence that fungicides changed the composition of the corn phyllosphere dependent on management, indicating that fungicides affected the abundance of similar OTUs across both treatments
+```{r}
+# Should change to do both T1 and T2 for corn? does that make sense?
+#### CORN V8 ####
+fungi_leaf_corn_V8_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_corn_V8_ANCOM.rds")
+colnames(fungi_leaf_corn_V8_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_corn_V8_ANCOM$GrowthStage <- "V8"
+fungi_leaf_corn_V8_ANCOM$Crop <- "Corn"
+fungi_leaf_corn_V8_ANCOM$Treatment <- "T1 & T2"
+fungi_leaf_corn_V8_ANCOM$StructuralZero <- ifelse(fungi_leaf_corn_V8_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_corn_V8_ANCOM$OTU[fungi_leaf_corn_V8_ANCOM$detected_0.7 == TRUE & fungi_leaf_corn_V8_ANCOM$StructuralZero == FALSE]
+fungi_leaf_corn_V8_ANCOM_sig <- fungi_leaf_corn_V8_ANCOM$OTU[fungi_leaf_corn_V8_ANCOM$detected_0.7 == TRUE]
+ 
+#### SOYBEAN BOTH GROWTH STAGES ####
+fungi_leaf_soy_R4_T1_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_soy_R4_T1_ANCOM.rds")
+colnames(fungi_leaf_soy_R4_T1_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_soy_R4_T1_ANCOM$GrowthStage <- "R4"
+fungi_leaf_soy_R4_T1_ANCOM$Crop <- "Soy"
+fungi_leaf_soy_R4_T1_ANCOM$Treatment <- "T1"
+fungi_leaf_soy_R4_T1_ANCOM$StructuralZero <- ifelse(fungi_leaf_soy_R4_T1_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_soy_R4_T1_ANCOM$OTU[fungi_leaf_soy_R4_T1_ANCOM$detected_0.7 == TRUE & fungi_leaf_soy_R4_T1_ANCOM$StructuralZero == FALSE]
+fungi_leaf_soy_R4_T1_sig <- fungi_leaf_soy_R4_T1_ANCOM$OTU[fungi_leaf_soy_R4_T1_ANCOM$detected_0.7 == TRUE]
+
+fungi_leaf_soy_R4_T2_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_soy_R4_T2_ANCOM.rds")
+colnames(fungi_leaf_soy_R4_T2_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_soy_R4_T2_ANCOM$GrowthStage <- "R4"
+fungi_leaf_soy_R4_T2_ANCOM$Crop <- "Soy"
+fungi_leaf_soy_R4_T2_ANCOM$Treatment <- "T2"
+fungi_leaf_soy_R4_T2_ANCOM$StructuralZero <- ifelse(fungi_leaf_soy_R4_T2_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_soy_R4_T2_ANCOM$OTU[fungi_leaf_soy_R4_T2_ANCOM$detected_0.7 == TRUE & fungi_leaf_soy_R4_T2_ANCOM$StructuralZero == FALSE]
+fungi_leaf_soy_R4_T2_sig <- fungi_leaf_soy_R4_T2_ANCOM$OTU[fungi_leaf_soy_R4_T2_ANCOM$detected_0.7 == TRUE]
+
+fungi_leaf_soy_R6_T1_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_soy_R6_T1_ANCOM.rds")
+colnames(fungi_leaf_soy_R6_T1_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_soy_R6_T1_ANCOM$GrowthStage <- "R6"
+fungi_leaf_soy_R6_T1_ANCOM$Crop <- "Soy"
+fungi_leaf_soy_R6_T1_ANCOM$Treatment <- "T1"
+fungi_leaf_soy_R6_T1_ANCOM$StructuralZero <- ifelse(fungi_leaf_soy_R6_T1_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_soy_R6_T1_ANCOM$OTU[fungi_leaf_soy_R6_T1_ANCOM$detected_0.7 == TRUE & fungi_leaf_soy_R6_T1_ANCOM$StructuralZero == FALSE]
+fungi_leaf_soy_R6_T1_sig <- fungi_leaf_soy_R6_T1_ANCOM$OTU[fungi_leaf_soy_R6_T1_ANCOM$detected_0.7 == TRUE]
+
+fungi_leaf_soy_R6_T2_ANCOM <- readRDS("ANCOM/HPCC_output/fungi_leaf_soy_R6_T2_ANCOM.rds")
+colnames(fungi_leaf_soy_R6_T2_ANCOM) <- c("OTU", "W", "detected_0.9", "detected_0.8", "detected_0.7", "detected_0.6")
+fungi_leaf_soy_R6_T2_ANCOM$GrowthStage <- "R6"
+fungi_leaf_soy_R6_T2_ANCOM$Crop <- "Soy"
+fungi_leaf_soy_R6_T2_ANCOM$Treatment <- "T2"
+fungi_leaf_soy_R6_T2_ANCOM$StructuralZero <- ifelse(fungi_leaf_soy_R6_T2_ANCOM$W == Inf, TRUE, FALSE)
+fungi_leaf_soy_R6_T2_ANCOM$OTU[fungi_leaf_soy_R6_T2_ANCOM$detected_0.7 == TRUE & fungi_leaf_soy_R6_T2_ANCOM$StructuralZero == FALSE]
+fungi_leaf_soy_R6_T2_sig <- fungi_leaf_soy_R6_T2_ANCOM$OTU[fungi_leaf_soy_R6_T2_ANCOM$detected_0.7 == TRUE]
+```
+
+
+### Network Complexity 
+
+Calculate network complexity and architechure based on each subgraph containing only the OTUs present in that sample. 
+
+Corn
+```{r}
+##### Network Complexity Stats Corn #####
+# Going to loop through all the samples and get the number of edges and nodes for each sub-graph
+
+### INPUT ###
+network.object <- meta.net.corn$igraph.object
+phyloseq.object <- fungi_leaf_corn # it doesn't really matter if you pick the fungal or prokaryote as long as they have the same samples
+network.complexity2 <- NULL
+edge.complexity <- NULL
+node.stats <- NULL
+
+sample.levels <- levels(sample_data(phyloseq.object)$SampleID)
+for (i in seq_along(sample.levels)) {
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(SampleID %in% sample.levels[[i]]) %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  otu_table() %>%
+  rownames()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(SampleID %in% sample.levels[[i]]) %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  otu_table() %>%
+  rownames()
+
+sample.data <- fungi.no.norm %>%
+  subset_samples(SampleID %in% sample.levels[[i]]) %>%
+  sample_data() %>%
+  as.tibble() %>%
+  as.data.frame()
+
+samples <- sample.data %>%
+  dplyr::select(SampleID, Crop, DateSampled, GrowthStage, Treatment, Rep, Sample, Fungicide)
+
+subset.taxa <- c(fungi.soy, prok.soy)
+print(paste("N taxa present in", sample.levels[[i]]))
+print(length(subset.taxa))
+###### Subsetting the network
+network_dc_switch <- induced_subgraph(network.object, which(V(network.object)$name %in% subset.taxa))
+print(network_dc_switch)
+# Delete isolated nodes
+#network_dc_switch <- delete.vertices(network_dc_switch, which(degree(network_dc_switch, mode = "all")== 0))
+network_dc_switch_no_weight <- delete_edge_attr(network_dc_switch, "weight")
+#### Node stats ####
+wtc <- cluster_walktrap(network_dc_switch_no_weight)
+mod <- modularity(network_dc_switch_no_weight, membership(wtc))
+connect <- pulsar::natural.connectivity(as_adj(network_dc_switch_no_weight), norm = TRUE)
+print(mod)
+hubs <- data.frame(hub_score(network_dc_switch_no_weight)$vector); colnames(hubs) <- c("hubscore")
+hubs$OTU <- V(network_dc_switch_no_weight)$name
+hubs$betweeness <- betweenness(network_dc_switch_no_weight, directed = FALSE, weights = NULL) 
+hubs$pr <- page_rank(network_dc_switch_no_weight)$vector 
+hubs$degree <- degree(network_dc_switch_no_weight)
+hubs$module <- wtc$membership
+
+hubs <- merge(hubs, samples)
+nodes.stats <- hubs
+node.stats2 <- left_join(nodes.stats, mean.rel.abund.combined, by = "OTU")
+node.stats <- rbind.data.frame(node.stats, node.stats2)
+########
+
+###### Network Complexity ######
+n.nodes <- length(V(network_dc_switch)) # N nodes 
+n.edges <- length(E(network_dc_switch)) # N edges
+Sample <- sample.levels[[i]]
+############
+
+###### Edge Stats #######
+edge.network <- data.frame(ends(network_dc_switch, E(network_dc_switch))) 
+colnames(edge.network) <- c("from", "to")
+
+edge.network <- left_join(edge.network, taxonomy.combined, by = c("from" = "OTU_ID"))
+
+colnames(edge.network) <- c("from", "to", "Kingdom_from", "Phylum_from", "Class_from", "Order_from", 
+                            "Family_from", "Genus_from", "Label_from", "Species_from")
+
+edge.network <- left_join(edge.network, taxonomy.combined, by = c("to" = "OTU_ID"))
+colnames(edge.network) <- c("from", "to", "Kingdom_from", "Phylum_from", "Class_from", "Order_from", 
+                            "Family_from", "Genus_from", "Label_from", "Species_from", 
+                            "Kingdom_to", "Phylum_to", "Class_to", "Order_to", 
+                            "Family_to", "Genus_v", "Label_to", "Species_to")
+edge.network$weights <- E(network_dc_switch)$weight
+edge.network$direction <- ifelse(edge.network$weights > 0, "Positive", "Negative")
+edge.network$inter <- ifelse(edge.network$Kingdom_from == edge.network$Kingdom_to, "Intrakingdom", "Interkingdom")
+edge.network$interXdirection <- interaction(edge.network$inter, edge.network$direction)
+edge.network$Kingdom_Kingdom <- ifelse(edge.network$inter == "Intrakingdom" & edge.network$Kingdom_to == "Fungi", "Fungal-Fungal", "Prokaryote-Prokaryote")
+
+edge.network$Tremellomycete_Alphaproteobacteria <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Alphaproteobacteria" & edge.network$direction == "Positive", "Tremellomycete-Alphaproteobacteria", "Other")
+edge.network$Tremellomycete_Actinobacteria <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Actinobacteria" & edge.network$direction == "Positive", "Tremellomycete-Actinobacteria", "Other")
+edge.network$Tremellomycete_Cytophagia <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Cytophagia" & edge.network$direction == "Positive", "Tremellomycete-Cytophagia", "Other")
+edge.network$Bull_Prok <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Genus_from %in% c("Sphingomonas", "Methylobacterium", "Hymenobacter", "Pseudomonas", "Nocardioides") & edge.network$direction == "Positive", "Bull-Prok", "Other")
+
+### Hannaella - Bacteria positive edges ###
+edge.network$Hannaella_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Hannaella_Sphingomonas", "Other")
+edge.network$Hannaella_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Hannaella_Methylobacterium", "Other")
+edge.network$Hannaella_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Hannaella_Hymenobacter", "Other")
+edge.network$Hannaella_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Hannaella_Pseudomonas", "Other")
+edge.network$Hannaella_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Hannaella_Nocardioides", "Other")
+
+### Dioszengia - Bacteria positive edges ###
+edge.network$Dioszegia_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Dioszegia_Sphingomonas", "Other")
+edge.network$Dioszegia_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Dioszegia_Methylobacterium", "Other")
+edge.network$Dioszegia_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Dioszegia_Hymenobacter", "Other")
+edge.network$Dioszegia_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Dioszegia_Pseudomonas", "Other")
+edge.network$Dioszegia_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Dioszegia_Nocardioides", "Other")
+
+### Vishniacozyma - Bacteria positive edges ###
+edge.network$Vishniacozyma_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Vishniacozyma_Sphingomonas", "Other")
+edge.network$Vishniacozyma_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Vishniacozyma_Methylobacterium", "Other")
+edge.network$Vishniacozyma_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Vishniacozyma_Hymenobacter", "Other")
+edge.network$Vishniacozyma_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Vishniacozyma_Pseudomonas", "Other")
+edge.network$Vishniacozyma_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Vishniacozyma_Nocardioides", "Other")
+
+### Sporobolomyces - Bacteria positive edges ###
+edge.network$Sporobolomyces_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Sporobolomyces_Sphingomonas", "Other")
+edge.network$Sporobolomyces_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Sporobolomyces_Methylobacterium", "Other")
+edge.network$Sporobolomyces_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Sporobolomyces_Hymenobacter", "Other")
+edge.network$Sporobolomyces_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Sporobolomyces_Pseudomonas", "Other")
+edge.network$Sporobolomyces_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Sporobolomyces_Nocardioides", "Other")
+edge.network$Sporobolomyces_Roseomonas <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Roseomonas") & edge.network$direction == "Positive", "Sporobolomyces_Roseomonas", "Other")
+edge.network$Sporobolomyces_Terrimonas <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Terrimonas") & edge.network$direction == "Positive", "Sporobolomyces_Terrimonas", "Other")
+edge.network$Sporobolomyces_Bacillus <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Bacillus") & edge.network$direction == "Positive", "Sporobolomyces_Bacillus", "Other")
+
+n.Tremellomycete_Alphaproteobacteria <- length(edge.network$Tremellomycete_Alphaproteobacteria[edge.network$Tremellomycete_Alphaproteobacteria != "Other"])
+n.Tremellomycete_Actinobacteria <- length(edge.network$Tremellomycete_Actinobacteria[edge.network$Tremellomycete_Actinobacteria != "Other"])
+n.Tremellomycete_Cytophagia <- length(edge.network$Tremellomycete_Cytophagia[edge.network$Tremellomycete_Cytophagia != "Other"])
+n.Bull_Prok <- length(edge.network$Bull_Prok[edge.network$Bull_Prok != "Other"])
+
+### n Hannaella - Bacteria positive edges ###
+n.Hannaella_Sphingomonas <- length(edge.network$Hannaella_Sphingomonas[edge.network$Hannaella_Sphingomonas != "Other"])
+n.Hannaella_Methylobacterium <- length(edge.network$Hannaella_Methylobacterium[edge.network$Hannaella_Methylobacterium != "Other"])
+n.Hannaella_Hymenobacter <- length(edge.network$Hannaella_Hymenobacter[edge.network$Hannaella_Hymenobacter != "Other"])
+n.Hannaella_Pseudomonas <- length(edge.network$Hannaella_Pseudomonas[edge.network$Hannaella_Pseudomonas != "Other"])
+n.Hannaella_Nocardioides <- length(edge.network$Hannaella_Nocardioides[edge.network$Hannaella_Nocardioides != "Other"])
+
+### n Dioszegia - Bacteria positive edges ###
+n.Dioszegia_Sphingomonas <- length(edge.network$Dioszegia_Sphingomonas[edge.network$Dioszegia_Sphingomonas != "Other"])
+n.Dioszegia_Methylobacterium <- length(edge.network$Dioszegia_Methylobacterium[edge.network$Dioszegia_Methylobacterium != "Other"])
+n.Dioszegia_Hymenobacter <- length(edge.network$Dioszegia_Hymenobacter[edge.network$Dioszegia_Hymenobacter != "Other"])
+n.Dioszegia_Pseudomonas <- length(edge.network$Dioszegia_Pseudomonas[edge.network$Dioszegia_Pseudomonas != "Other"])
+n.Dioszegia_Nocardioides <- length(edge.network$Dioszegia_Nocardioides[edge.network$Dioszegia_Nocardioides != "Other"])
+
+### n Vishniacozyma - Bacteria positive edges ###
+n.Vishniacozyma_Sphingomonas <- length(edge.network$Vishniacozyma_Sphingomonas[edge.network$Vishniacozyma_Sphingomonas != "Other"])
+n.Vishniacozyma_Methylobacterium <- length(edge.network$Vishniacozyma_Methylobacterium[edge.network$Vishniacozyma_Methylobacterium != "Other"])
+n.Vishniacozyma_Hymenobacter <- length(edge.network$Vishniacozyma_Hymenobacter[edge.network$Vishniacozyma_Hymenobacter != "Other"])
+n.Vishniacozyma_Pseudomonas <- length(edge.network$Vishniacozyma_Pseudomonas[edge.network$Vishniacozyma_Pseudomonas != "Other"])
+n.Vishniacozyma_Nocardioides <- length(edge.network$Vishniacozyma_Nocardioides[edge.network$Vishniacozyma_Nocardioides != "Other"])
+
+### n Sporobolomyces - Bacteria positive edges ###
+n.Sporobolomyces_Sphingomonas <- length(edge.network$Sporobolomyces_Sphingomonas[edge.network$Sporobolomyces_Sphingomonas != "Other"])
+n.Sporobolomyces_Methylobacterium <- length(edge.network$Sporobolomyces_Methylobacterium[edge.network$Sporobolomyces_Methylobacterium != "Other"])
+n.Sporobolomyces_Hymenobacter <- length(edge.network$Sporobolomyces_Hymenobacter[edge.network$Sporobolomyces_Hymenobacter != "Other"])
+n.Sporobolomyces_Pseudomonas <- length(edge.network$Sporobolomyces_Pseudomonas[edge.network$Sporobolomyces_Pseudomonas != "Other"])
+n.Sporobolomyces_Nocardioides <- length(edge.network$Sporobolomyces_Nocardioides[edge.network$Sporobolomyces_Nocardioides != "Other"])
+n.Sporobolomyces_Roseomonas <- length(edge.network$Sporobolomyces_Roseomonas[edge.network$Sporobolomyces_Roseomonas != "Other"])
+n.Sporobolomyces_Terrimonas <- length(edge.network$Sporobolomyces_Terrimonas[edge.network$Sporobolomyces_Terrimonas != "Other"])
+n.Sporobolomyces_Bacillus <- length(edge.network$Sporobolomyces_Bacillus[edge.network$Sporobolomyces_Bacillus != "Other"])
+
+n.Intrakingdom.Neg <- length(edge.network$interXdirection[edge.network$interXdirection == "Intrakingdom.Negative"])
+n.Intrakingdom.Pos <- length(edge.network$interXdirection[edge.network$interXdirection == "Intrakingdom.Positive"])
+n.Interkingdom.Pos <- length(edge.network$interXdirection[edge.network$interXdirection == "Interkingdom.Positive"])
+n.Interkingdom.Neg <- length(edge.network$interXdirection[edge.network$interXdirection == "Interkingdom.Negative"])
+n.Fungal.Neg <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Fungal-Fungal" & edge.network$direction == "Negative"])
+n.Fungal.Pos <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Fungal-Fungal" & edge.network$direction == "Positive"])
+n.Prok.Neg <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Prokaryote-Prokaryote" & edge.network$direction == "Negative"])
+n.Prok.Pos <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Prokaryote-Prokaryote" & edge.network$direction == "Positive"])
+
+
+edge.network_i <- merge(edge.network, samples)
+edge.complexity <- rbind.data.frame(edge.network_i, edge.complexity)
+######
+
+network_complexity <- data.frame(phyloseq.object@sam_data[phyloseq.object@sam_data$SampleID == Sample,]) 
+network_complexity_i <- cbind.data.frame(n.nodes, n.edges, network_complexity, 
+                                         n.Intrakingdom.Neg, n.Intrakingdom.Pos, n.Interkingdom.Pos, n.Interkingdom.Neg,
+                                         n.Fungal.Neg, n.Fungal.Pos, n.Prok.Neg, n.Prok.Pos, mod, connect, n.Tremellomycete_Alphaproteobacteria, n.Tremellomycete_Actinobacteria, n.Tremellomycete_Cytophagia, n.Bull_Prok, n.Hannaella_Sphingomonas, n.Hannaella_Methylobacterium, n.Hannaella_Hymenobacter, n.Hannaella_Pseudomonas, n.Hannaella_Nocardioides, 
+                                         n.Vishniacozyma_Sphingomonas, n.Vishniacozyma_Methylobacterium, n.Vishniacozyma_Hymenobacter, n.Vishniacozyma_Pseudomonas, n.Vishniacozyma_Nocardioides, 
+                                         n.Dioszegia_Sphingomonas, n.Dioszegia_Methylobacterium, n.Dioszegia_Hymenobacter, n.Dioszegia_Pseudomonas, n.Dioszegia_Nocardioides, n.Sporobolomyces_Sphingomonas, n.Sporobolomyces_Methylobacterium, n.Sporobolomyces_Hymenobacter, n.Sporobolomyces_Pseudomonas, 
+                                         n.Sporobolomyces_Nocardioides, n.Sporobolomyces_Roseomonas, n.Sporobolomyces_Terrimonas, n.Sporobolomyces_Bacillus)
+network.complexity2 <- rbind.data.frame(network.complexity2, network_complexity_i)
+}
+
+### OTUPUT ###
+Network.complexity.corn <- network.complexity2 
+Network.edges.corn <- edge.complexity
+Network.nodes.corn <- node.stats
+##################################
+```
+
+Soybean
+```{r}
+##### Network Complexity Stats Soy #####
+# Going to loop through all the samples and get the number of edges and nodes for each sub-graph
+
+### INPUT ###
+network.object <- meta.net.soy$igraph.object
+phyloseq.object <- fungi_leaf_soy # it doesn't really matter if you pick the fungal or prokaryote as long as they have the same samples
+network.complexity2 <- NULL
+edge.complexity <- NULL
+node.stats <- NULL
+
+sample.levels <- levels(sample_data(phyloseq.object)$SampleID)
+for (i in seq_along(sample.levels)) {
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(SampleID %in% sample.levels[[i]]) %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  otu_table() %>%
+  rownames()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(SampleID %in% sample.levels[[i]]) %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  otu_table() %>%
+  rownames()
+
+sample.data <- fungi.no.norm %>%
+  subset_samples(SampleID %in% sample.levels[[i]]) %>%
+  sample_data() %>%
+  as.tibble() %>%
+  as.data.frame()
+
+samples <- sample.data %>%
+  dplyr::select(SampleID, Crop, DateSampled, GrowthStage, Treatment, Rep, Sample, Fungicide)
+
+subset.taxa <- c(fungi.soy, prok.soy)
+print(paste("N taxa present in", sample.levels[[i]]))
+print(length(subset.taxa))
+###### Subsetting the network
+network_dc_switch <- induced_subgraph(network.object, which(V(network.object)$name %in% subset.taxa))
+print(network_dc_switch)
+# Delete isolated nodes
+#network_dc_switch <- delete.vertices(network_dc_switch, which(degree(network_dc_switch, mode = "all")== 0))
+network_dc_switch_no_weight <- delete_edge_attr(network_dc_switch, "weight")
+#### Node stats ####
+wtc <- cluster_walktrap(network_dc_switch_no_weight)
+mod <- modularity(network_dc_switch_no_weight, membership(wtc))
+connect <- pulsar::natural.connectivity(as_adj(network_dc_switch_no_weight), norm = TRUE)
+print(mod)
+hubs <- data.frame(hub_score(network_dc_switch_no_weight)$vector); colnames(hubs) <- c("hubscore")
+hubs$OTU <- V(network_dc_switch_no_weight)$name
+hubs$betweeness <- betweenness(network_dc_switch_no_weight, directed = FALSE, weights = NULL) 
+hubs$pr <- page_rank(network_dc_switch_no_weight)$vector 
+hubs$degree <- degree(network_dc_switch_no_weight)
+hubs$module <- wtc$membership
+
+hubs <- merge(hubs, samples)
+nodes.stats <- hubs
+node.stats2 <- left_join(nodes.stats, mean.rel.abund.combined, by = "OTU")
+node.stats <- rbind.data.frame(node.stats, node.stats2)
+########
+
+###### Network Complexity ######
+n.nodes <- length(V(network_dc_switch)) # N nodes 
+n.edges <- length(E(network_dc_switch)) # N edges
+Sample <- sample.levels[[i]]
+############
+
+###### Edge Stats #######
+edge.network <- data.frame(ends(network_dc_switch, E(network_dc_switch))) 
+colnames(edge.network) <- c("from", "to")
+
+edge.network <- left_join(edge.network, taxonomy.combined, by = c("from" = "OTU_ID"))
+
+colnames(edge.network) <- c("from", "to", "Kingdom_from", "Phylum_from", "Class_from", "Order_from", 
+                            "Family_from", "Genus_from", "Label_from", "Species_from")
+
+edge.network <- left_join(edge.network, taxonomy.combined, by = c("to" = "OTU_ID"))
+colnames(edge.network) <- c("from", "to", "Kingdom_from", "Phylum_from", "Class_from", "Order_from", 
+                            "Family_from", "Genus_from", "Label_from", "Species_from", 
+                            "Kingdom_to", "Phylum_to", "Class_to", "Order_to", 
+                            "Family_to", "Genus_v", "Label_to", "Species_to")
+edge.network$weights <- E(network_dc_switch)$weight
+edge.network$direction <- ifelse(edge.network$weights > 0, "Positive", "Negative")
+edge.network$inter <- ifelse(edge.network$Kingdom_from == edge.network$Kingdom_to, "Intrakingdom", "Interkingdom")
+edge.network$interXdirection <- interaction(edge.network$inter, edge.network$direction)
+edge.network$Kingdom_Kingdom <- ifelse(edge.network$inter == "Intrakingdom" & edge.network$Kingdom_to == "Fungi", "Fungal-Fungal", "Prokaryote-Prokaryote")
+
+edge.network$Tremellomycete_Alphaproteobacteria <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Alphaproteobacteria" & edge.network$direction == "Positive", "Tremellomycete-Alphaproteobacteria", "Other")
+edge.network$Tremellomycete_Actinobacteria <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Actinobacteria" & edge.network$direction == "Positive", "Tremellomycete-Actinobacteria", "Other")
+edge.network$Tremellomycete_Cytophagia <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Cytophagia" & edge.network$direction == "Positive", "Tremellomycete-Cytophagia", "Other")
+edge.network$Bull_Prok <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Genus_from %in% c("Sphingomonas", "Methylobacterium", "Hymenobacter", "Pseudomonas", "Nocardioides") & edge.network$direction == "Positive", "Bull-Prok", "Other")
+
+### Hannaella - Bacteria positive edges ###
+edge.network$Hannaella_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Hannaella_Sphingomonas", "Other")
+edge.network$Hannaella_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Hannaella_Methylobacterium", "Other")
+edge.network$Hannaella_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Hannaella_Hymenobacter", "Other")
+edge.network$Hannaella_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Hannaella_Pseudomonas", "Other")
+edge.network$Hannaella_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Hannaella_Nocardioides", "Other")
+
+### Dioszengia - Bacteria positive edges ###
+edge.network$Dioszegia_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Dioszegia_Sphingomonas", "Other")
+edge.network$Dioszegia_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Dioszegia_Methylobacterium", "Other")
+edge.network$Dioszegia_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Dioszegia_Hymenobacter", "Other")
+edge.network$Dioszegia_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Dioszegia_Pseudomonas", "Other")
+edge.network$Dioszegia_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Dioszegia_Nocardioides", "Other")
+
+### Vishniacozyma - Bacteria positive edges ###
+edge.network$Vishniacozyma_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Vishniacozyma_Sphingomonas", "Other")
+edge.network$Vishniacozyma_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Vishniacozyma_Methylobacterium", "Other")
+edge.network$Vishniacozyma_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Vishniacozyma_Hymenobacter", "Other")
+edge.network$Vishniacozyma_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Vishniacozyma_Pseudomonas", "Other")
+edge.network$Vishniacozyma_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Vishniacozyma_Nocardioides", "Other")
+
+### Sporobolomyces - Bacteria positive edges ###
+edge.network$Sporobolomyces_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Sporobolomyces_Sphingomonas", "Other")
+edge.network$Sporobolomyces_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Sporobolomyces_Methylobacterium", "Other")
+edge.network$Sporobolomyces_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Sporobolomyces_Hymenobacter", "Other")
+edge.network$Sporobolomyces_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Sporobolomyces_Pseudomonas", "Other")
+edge.network$Sporobolomyces_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Sporobolomyces_Nocardioides", "Other")
+edge.network$Sporobolomyces_Roseomonas <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Roseomonas") & edge.network$direction == "Positive", "Sporobolomyces_Roseomonas", "Other")
+edge.network$Sporobolomyces_Terrimonas <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Terrimonas") & edge.network$direction == "Positive", "Sporobolomyces_Terrimonas", "Other")
+edge.network$Sporobolomyces_Bacillus <- ifelse(edge.network$Genus_v %in% c("Sporobolomyces") & edge.network$Genus_from %in% c("Bacillus") & edge.network$direction == "Positive", "Sporobolomyces_Bacillus", "Other")
+
+n.Tremellomycete_Alphaproteobacteria <- length(edge.network$Tremellomycete_Alphaproteobacteria[edge.network$Tremellomycete_Alphaproteobacteria != "Other"])
+n.Tremellomycete_Actinobacteria <- length(edge.network$Tremellomycete_Actinobacteria[edge.network$Tremellomycete_Actinobacteria != "Other"])
+n.Tremellomycete_Cytophagia <- length(edge.network$Tremellomycete_Cytophagia[edge.network$Tremellomycete_Cytophagia != "Other"])
+n.Bull_Prok <- length(edge.network$Bull_Prok[edge.network$Bull_Prok != "Other"])
+
+### n Hannaella - Bacteria positive edges ###
+n.Hannaella_Sphingomonas <- length(edge.network$Hannaella_Sphingomonas[edge.network$Hannaella_Sphingomonas != "Other"])
+n.Hannaella_Methylobacterium <- length(edge.network$Hannaella_Methylobacterium[edge.network$Hannaella_Methylobacterium != "Other"])
+n.Hannaella_Hymenobacter <- length(edge.network$Hannaella_Hymenobacter[edge.network$Hannaella_Hymenobacter != "Other"])
+n.Hannaella_Pseudomonas <- length(edge.network$Hannaella_Pseudomonas[edge.network$Hannaella_Pseudomonas != "Other"])
+n.Hannaella_Nocardioides <- length(edge.network$Hannaella_Nocardioides[edge.network$Hannaella_Nocardioides != "Other"])
+
+### n Dioszegia - Bacteria positive edges ###
+n.Dioszegia_Sphingomonas <- length(edge.network$Dioszegia_Sphingomonas[edge.network$Dioszegia_Sphingomonas != "Other"])
+n.Dioszegia_Methylobacterium <- length(edge.network$Dioszegia_Methylobacterium[edge.network$Dioszegia_Methylobacterium != "Other"])
+n.Dioszegia_Hymenobacter <- length(edge.network$Dioszegia_Hymenobacter[edge.network$Dioszegia_Hymenobacter != "Other"])
+n.Dioszegia_Pseudomonas <- length(edge.network$Dioszegia_Pseudomonas[edge.network$Dioszegia_Pseudomonas != "Other"])
+n.Dioszegia_Nocardioides <- length(edge.network$Dioszegia_Nocardioides[edge.network$Dioszegia_Nocardioides != "Other"])
+
+### n Vishniacozyma - Bacteria positive edges ###
+n.Vishniacozyma_Sphingomonas <- length(edge.network$Vishniacozyma_Sphingomonas[edge.network$Vishniacozyma_Sphingomonas != "Other"])
+n.Vishniacozyma_Methylobacterium <- length(edge.network$Vishniacozyma_Methylobacterium[edge.network$Vishniacozyma_Methylobacterium != "Other"])
+n.Vishniacozyma_Hymenobacter <- length(edge.network$Vishniacozyma_Hymenobacter[edge.network$Vishniacozyma_Hymenobacter != "Other"])
+n.Vishniacozyma_Pseudomonas <- length(edge.network$Vishniacozyma_Pseudomonas[edge.network$Vishniacozyma_Pseudomonas != "Other"])
+n.Vishniacozyma_Nocardioides <- length(edge.network$Vishniacozyma_Nocardioides[edge.network$Vishniacozyma_Nocardioides != "Other"])
+
+### n Sporobolomyces - Bacteria positive edges ###
+n.Sporobolomyces_Sphingomonas <- length(edge.network$Sporobolomyces_Sphingomonas[edge.network$Sporobolomyces_Sphingomonas != "Other"])
+n.Sporobolomyces_Methylobacterium <- length(edge.network$Sporobolomyces_Methylobacterium[edge.network$Sporobolomyces_Methylobacterium != "Other"])
+n.Sporobolomyces_Hymenobacter <- length(edge.network$Sporobolomyces_Hymenobacter[edge.network$Sporobolomyces_Hymenobacter != "Other"])
+n.Sporobolomyces_Pseudomonas <- length(edge.network$Sporobolomyces_Pseudomonas[edge.network$Sporobolomyces_Pseudomonas != "Other"])
+n.Sporobolomyces_Nocardioides <- length(edge.network$Sporobolomyces_Nocardioides[edge.network$Sporobolomyces_Nocardioides != "Other"])
+n.Sporobolomyces_Roseomonas <- length(edge.network$Sporobolomyces_Roseomonas[edge.network$Sporobolomyces_Roseomonas != "Other"])
+n.Sporobolomyces_Terrimonas <- length(edge.network$Sporobolomyces_Terrimonas[edge.network$Sporobolomyces_Terrimonas != "Other"])
+n.Sporobolomyces_Bacillus <- length(edge.network$Sporobolomyces_Bacillus[edge.network$Sporobolomyces_Bacillus != "Other"])
+
+n.Intrakingdom.Neg <- length(edge.network$interXdirection[edge.network$interXdirection == "Intrakingdom.Negative"])
+n.Intrakingdom.Pos <- length(edge.network$interXdirection[edge.network$interXdirection == "Intrakingdom.Positive"])
+n.Interkingdom.Pos <- length(edge.network$interXdirection[edge.network$interXdirection == "Interkingdom.Positive"])
+n.Interkingdom.Neg <- length(edge.network$interXdirection[edge.network$interXdirection == "Interkingdom.Negative"])
+n.Fungal.Neg <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Fungal-Fungal" & edge.network$direction == "Negative"])
+n.Fungal.Pos <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Fungal-Fungal" & edge.network$direction == "Positive"])
+n.Prok.Neg <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Prokaryote-Prokaryote" & edge.network$direction == "Negative"])
+n.Prok.Pos <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Prokaryote-Prokaryote" & edge.network$direction == "Positive"])
+
+
+edge.network_i <- merge(edge.network, samples)
+edge.complexity <- rbind.data.frame(edge.network_i, edge.complexity)
+######
+
+network_complexity <- data.frame(phyloseq.object@sam_data[phyloseq.object@sam_data$SampleID == Sample,]) 
+network_complexity_i <- cbind.data.frame(n.nodes, n.edges, network_complexity, 
+                                         n.Intrakingdom.Neg, n.Intrakingdom.Pos, n.Interkingdom.Pos, n.Interkingdom.Neg,
+                                         n.Fungal.Neg, n.Fungal.Pos, n.Prok.Neg, n.Prok.Pos, mod, connect, n.Tremellomycete_Alphaproteobacteria, n.Tremellomycete_Actinobacteria, n.Tremellomycete_Cytophagia, n.Bull_Prok, n.Hannaella_Sphingomonas, n.Hannaella_Methylobacterium, n.Hannaella_Hymenobacter, n.Hannaella_Pseudomonas, n.Hannaella_Nocardioides, 
+                                         n.Vishniacozyma_Sphingomonas, n.Vishniacozyma_Methylobacterium, n.Vishniacozyma_Hymenobacter, n.Vishniacozyma_Pseudomonas, n.Vishniacozyma_Nocardioides, 
+                                         n.Dioszegia_Sphingomonas, n.Dioszegia_Methylobacterium, n.Dioszegia_Hymenobacter, n.Dioszegia_Pseudomonas, n.Dioszegia_Nocardioides, n.Sporobolomyces_Sphingomonas, n.Sporobolomyces_Methylobacterium, n.Sporobolomyces_Hymenobacter, n.Sporobolomyces_Pseudomonas, 
+                                         n.Sporobolomyces_Nocardioides, n.Sporobolomyces_Roseomonas, n.Sporobolomyces_Terrimonas, n.Sporobolomyces_Bacillus)
+network.complexity2 <- rbind.data.frame(network.complexity2, network_complexity_i)
+}
+
+### OTUPUT ###
+Network.complexity.soy <- network.complexity2 
+Network.edges.soy <- edge.complexity
+Network.nodes.soy <- node.stats
+##################################
+```
+
+Put both metanetwork objects together
+```{r}
+Network.complexity <- rbind.data.frame(Network.complexity.corn, Network.complexity.soy)
+Network.nodes <- rbind.data.frame(Network.nodes.corn, Network.nodes.soy)
+Network.edges <- rbind.data.frame(Network.edges.soy, Network.edges.corn)
+```
+
+```{r}
+# Complexity = edges per node
+Network.complexity$complexity <- Network.complexity$n.edges/Network.complexity$n.nodes 
+Network.complexity$Treatment_label <- ifelse(Network.complexity$Treatment == "T1", "Conventional", "No-till")
+# Facet Labels for plots
+Network.nodes$Treatment_label <- ifelse(Network.nodes$Treatment == "T1", "Conventional", "No-till")
+
+# Changing the date format and putting the categorical dpf 
+Network.complexity$DateSampled <- as.Date(Network.complexity$DateSampled, "%d-%b-%y")
+Network.complexity$DPF <- ifelse(Network.complexity$DateSampled == "2018-08-03", "0-dpf",
+                                 ifelse(Network.complexity$DateSampled == "2017-06-26", "0-dpf",
+                                        ifelse(Network.complexity$DateSampled == "2018-08-16", "13-dpf",
+                                               ifelse(Network.complexity$DateSampled == "2017-07-5", "9-dpf",
+                                                      ifelse(Network.complexity$DateSampled == "2017-07-31", "34-dpf", "33-dpf")))))
+Network.complexity$DPF <- factor(Network.complexity$DPF, levels = c("0-dpf", "9-dpf", "13-dpf", "33-dpf", "34-dpf"))
+
+Network.nodes$DateSampled <- as.Date(Network.nodes$DateSampled, "%d-%b-%y")
+Network.nodes$DPF <- ifelse(Network.nodes$DateSampled == "2018-08-03", "0-dpf",
+                                 ifelse(Network.nodes$DateSampled == "2017-06-26", "0-dpf",
+                                        ifelse(Network.nodes$DateSampled == "2018-08-16", "13-dpf",
+                                               ifelse(Network.nodes$DateSampled == "2017-07-5", "9-dpf",
+                                                      ifelse(Network.nodes$DateSampled == "2017-07-31", "34-dpf", "33-dpf")))))
+Network.nodes$DPF <- factor(Network.nodes$DPF, levels = c("0-dpf", "9-dpf", "13-dpf", "33-dpf", "34-dpf"))
+
+Network.edges$DateSampled <- as.Date(Network.edges$DateSampled, "%d-%b-%y")
+Network.edges$DPF <- ifelse(Network.edges$DateSampled == "2018-08-03", "0-dpf",
+                                 ifelse(Network.edges$DateSampled == "2017-06-26", "0-dpf",
+                                        ifelse(Network.edges$DateSampled == "2018-08-16", "13-dpf",
+                                               ifelse(Network.edges$DateSampled == "2017-07-5", "9-dpf",
+                                                      ifelse(Network.edges$DateSampled == "2017-07-31", "34-dpf", "33-dpf")))))
+Network.edges$DPF <- factor(Network.edges$DPF, levels = c("0-dpf", "9-dpf", "13-dpf", "33-dpf", "34-dpf"))
+```
+
+What many negative vs positive interactions are there. 
+```{r}
+Network.edges %>%
+  subset(Kingdom_to %in% c("Fungi") & Kingdom_from %in% c("Bacteria") ) %>%
+  group_by(SampleID, Crop, Fungicide, direction, Kingdom_from) %>%
+  tally() %>% # edges per sample (subgraph)
+  group_by(Crop, Fungicide, direction) %>%
+  nest() %>%
+  mutate(mean.percent.edges = purrr::map(data,~mean(.$n))) %>%
+  mutate(SE.percent.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.percent.edges, SE.percent.edges)) %>%
+  ggplot(aes(x = interaction(Crop, Fungicide), y = mean.percent.edges, fill = direction)) + 
+  geom_bar()
+
+ggplot(Network.edges, aes(x = interaction(Fungicide, Crop), fill = direction)) + 
+  geom_bar() + 
+  facet_wrap(~inter)
+```
+
+
+How many edges per-sample, on average, do the Bulleribacidiaceae have with bacteria, and which Phyla, and classes do they co-occur with
+```{r}
+##### Soybean - Phylum ####
+
+# bulleribacidiaceae
+Network.edges %>%
+  subset(Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & Kingdom_from == "Bacteria" & Crop == "Soy" & Fungicide == "C") %>%
+  group_by(SampleID, Class_from, direction) %>%
+  tally() %>% # counts the number of edges
+  ungroup() %>%
+  complete(Class_from, nesting(SampleID, direction), fill = list(n = 0)) %>%
+  group_by(Class_from, direction) %>% # group by class
+  nest() %>% # nest the classes for each sample
+  mutate(mean.edges = purrr::map(data,~mean(.$n))) %>% # iterate through the classes to calculate the mean number of edges per sample
+  mutate(SE.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.edges,SE.edges)) %>%
+  arrange(-mean.edges) 
+
+# Sporidobolaceae
+Network.edges %>%
+  subset(Genus_v %in% c("Sporobolomyces") & Kingdom_from == "Bacteria" & Fungicide == "C" & Crop == "Soy") %>%
+  group_by(SampleID, Fungicide, Phylum_from) %>%
+  tally() %>% # counts the number of edges
+  ungroup() %>%
+  complete(Phylum_from, nesting(SampleID, Fungicide), fill = list(n = 0)) %>%
+  group_by(Phylum_from, Fungicide) %>% # group by class
+  nest() %>% # nest the classes for each sample
+  mutate(mean.edges = purrr::map(data,~mean(.$n))) %>% # iterate through the classes to calculate the mean number of edges per sample
+  mutate(SE.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.edges,SE.edges)) %>%
+  arrange(-mean.edges)  
+
+############### 
+
+##### Corn - Phylum ####
+Network.edges %>%
+  subset(Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & Kingdom_from == "Bacteria" & Fungicide == "C" & Crop == "Corn") %>%
+  group_by(SampleID, Phylum_from) %>%
+  tally() %>%
+  mutate(n_pct = 100*n/sum(n)) %>%
+  group_by(Phylum_from) %>%
+  nest() %>%
+  mutate(mean.percent.edges = purrr::map(data,~mean(.$n_pct))) %>%
+  mutate(SE.percent.edges = purrr::map(data,~sd(.$n_pct)/sqrt(length(.$n_pct)))) %>%
+  mutate(mean.edges = purrr::map(data,~mean(.$n))) %>%
+  mutate(SE.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.edges,SE.edges, mean.percent.edges, SE.percent.edges)) %>%
+  arrange(-mean.percent.edges) 
+
+############### 
+
+##### Soybean - Classes ####
+Network.edges %>%
+  subset(Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & Class_from %in% c("Proteobacteria", "Actinobacteria", "Bacteroidetes") & Crop == "Soy") %>%
+  group_by(SampleID, Fungicide, Class_from) %>%
+  tally() %>% # counts the number of edges
+  ungroup() %>%
+  complete(Class_from, nesting(SampleID, Fungicide), fill = list(n = 0)) %>%
+  group_by(Class_from, Fungicide) %>% # group by class
+  nest() %>% # nest the classes for each sample
+  mutate(mean.edges = purrr::map(data,~mean(.$n))) %>% # iterate through the classes to calculate the mean number of edges per sample
+  mutate(SE.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.edges,SE.edges)) %>%
+  arrange(-mean.edges) 
+
+# about half of the bacteria bulleribacideaceae were with alphaproteobacteria
+
+Network.edges %>%
+  subset(Genus_v %in% c("Sporobolomyces") & Kingdom_from %in% c("Bacteria") & Fungicide == "C" & Crop == "Soy") %>%
+  group_by(SampleID, Genus_from) %>%
+  tally() %>%
+  mutate(n_pct = 100*n/sum(n)) %>%
+  group_by(Genus_from) %>%
+  nest() %>%
+  mutate(mean.percent.edges = purrr::map(data,~mean(.$n_pct))) %>%
+  mutate(SE.percent.edges = purrr::map(data,~sd(.$n_pct)/sqrt(length(.$n_pct)))) %>%
+  mutate(mean.edges = purrr::map(data,~mean(.$n))) %>%
+  mutate(SE.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.edges,SE.edges, mean.percent.edges, SE.percent.edges)) %>%
+  arrange(-mean.percent.edges) 
+
+###############
+
+##### Corn - Classes #####
+Network.edges %>%
+  subset(Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & Phylum_from %in% c("Proteobacteria", "Actinobacteria", "Bacteroidetes") & Fungicide == "C" & Crop == "Corn") %>%
+  group_by(SampleID, Class_from) %>%
+  tally() %>%
+  mutate(n_pct = 100*n/sum(n)) %>%
+  group_by(Class_from) %>%
+  nest() %>%
+  mutate(mean.percent.edges = purrr::map(data,~mean(.$n_pct))) %>%
+  mutate(SE.percent.edges = purrr::map(data,~sd(.$n_pct)/sqrt(length(.$n_pct)))) %>%
+  mutate(mean.edges = purrr::map(data,~mean(.$n))) %>%
+  mutate(SE.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.edges,SE.edges, mean.percent.edges, SE.percent.edges)) %>%
+  arrange(-mean.percent.edges) 
+
+# About 70 % cumulative with Actinobacteria, and 30 % with Alphaproteobacteria - different for corn. 
+
+###############
+```
+So, it seems that most of the edges (i.e., co-occurances) between the Bulleribacidiaceae yeasts and bacteria occur between either the Actinobacteria for corn and Proteobacteria for soybean. Next lets see if those interactions are mostly negative or positive.
+
+Are these co-occurances usually positive or negative?
+```{r}
+##### Soybean #####
+Network.edges %>%
+  subset(Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & Class_from %in% c("Actinobacteria", "Gammaproteobacteria", "Alphaproteobacteria", "Bacteroidia") & Fungicide == "C" & Crop == "Soy") %>%
+group_by(SampleID, direction, Species_to) %>%
+  tally() %>% # counts the number of edges
+  ungroup() %>%
+  complete(Species_to, nesting(SampleID, direction), fill = list(n = 0)) %>%
+  group_by(Species_to, direction) %>% # group by class
+  nest() %>% # nest the classes for each sample
+  mutate(mean.edges = purrr::map(data,~mean(.$n))) %>% # iterate through the classes to calculate the mean number of edges per sample
+  mutate(SE.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.edges,SE.edges)) %>%
+  arrange(-mean.edges) %>%
+  pivot_wider(id_cols = c(Species_to), names_from = direction, values_from = mean.edges) %>%
+  arrange(-Positive) %>%
+  mutate(fold.change = Positive/Negative)
+
+
+
+
+  group_by(SampleID, direction, Class_from) %>%
+  tally() %>% # edges per sample (subgraph) at the Class level
+  group_by(direction, Class_from) %>%
+  nest() %>%
+  mutate(mean.percent.edges = purrr::map(data,~mean(.$n))) %>%
+  mutate(SE.percent.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.percent.edges, SE.percent.edges)) %>%
+  pivot_wider(id_cols = c(Class_from), names_from = direction, values_from = mean.percent.edges) %>%
+  arrange(-Positive) %>%
+  mutate(fold.change = Positive/Negative)
+
+# Edges among these three fungal genera with Proteobacteria were disproportionately positive with on average 2.33 times more positive than negative edges (mean negative edges = 4.46 edges per sample; mean positive edges = 10.0 edges per sample). Similarly for Actinobacteria, there were 2.16 times more positive than negative edges per sample.
+
+Network.edges %>%
+  subset(Genus_v %in% c("Sporobolomyces") & Class_from %in% c("Alphaproteobacteria", "Actinobacteria", "Bacilli") & Fungicide == "C" & Crop == "Soy") %>%
+  group_by(SampleID, direction, Class_from) %>%
+  tally() %>% # edges per sample (subgraph) at the Class level
+  group_by(direction, Class_from) %>%
+  nest() %>%
+  mutate(mean.percent.edges = purrr::map(data,~mean(.$n))) %>%
+  mutate(SE.percent.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.percent.edges, SE.percent.edges)) %>%
+  pivot_wider(id_cols = c(Class_from), names_from = direction, values_from = mean.percent.edges) %>%
+  arrange(-Positive) %>%
+  mutate(fold.change = Positive/Negative)
+
+
+##### Corn #####
+
+Network.edges %>%
+  subset(Kingdom_to %in% c("Fungi") & Kingdom_from %in% c("Bacteria") & Fungicide == "C" & Crop == "Corn") %>%
+  group_by(SampleID, direction, Kingdom_from) %>%
+  tally() %>% # edges per sample (subgraph) at the Class level
+  group_by(direction, Class_from) %>%
+  nest() %>%
+  mutate(mean.percent.edges = purrr::map(data,~mean(.$n))) %>%
+  mutate(SE.percent.edges = purrr::map(data,~sd(.$n)/sqrt(length(.$n)))) %>%
+  unnest(c(mean.percent.edges, SE.percent.edges)) %>%
+  pivot_wider(id_cols = c(Class_from), names_from = direction, values_from = mean.percent.edges) %>%
+  arrange(-Positive) %>%
+  mutate(fold.change = Positive/Negative)
+
+# Edges among these three fungal genera with Alphaproteobacteria were disproportionately positive with on average 1.57 times more positive than negative edges (mean negative edges = 4.46 edges per sample; mean positive edges = 10.0 edges per sample). Similarly for Actinobacteria, there were 3.02 times more positive than negative edges per sample.
+```
+
+Lets plot these results
+```{r}
+#### MODULARITY ####
+modularity.box <- ggplot(Network.complexity, aes(x = DPF, y = mod, color = Fungicide)) + 
+  geom_boxplot() + 
+  geom_point(position = position_jitterdodge()) +
+  ylab("Modularity") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label.y = c(0.1), method = "wilcox.test") +  
+  #scale_color_manual(values=c(cbbPalette[[2]], cbbPalette[[1]]), labels = c("Fungicide", "Control")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Treatment_label*Crop, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### NUMBER OF EDGES PER NODE (i.e., Network Complexity) ####
+complexity.box <- ggplot(Network.complexity, aes(x = DPF, y = complexity, color = Fungicide)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_point(position = position_jitterdodge()) +
+  ylab("Linkage density") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label.y = c(0.1), method = "wilcox.test") +  
+  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### NATRUAL CONNECTEDNESS ####
+conectivity.box <- ggplot(Network.complexity, aes(x = DPF, y = connect, color = Fungicide)) + 
+  geom_boxplot() + 
+  geom_point(position = position_jitterdodge()) +
+  ylab("Natural Connectivity") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.001), method = "wilcox.test") +  
+  #scale_color_manual(values=c(cbbPalette[[2]], cbbPalette[[1]]), labels = c("Fungicide", "Control")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### PROPORTION OF POSITIVE INTERKINGDOM INTERACTIONS ####
+interkingdom.pos <- ggplot(Network.complexity, aes(x = DateSampled, y = n.Interkingdom.Pos/n.edges, color = Fungicide)) + 
+  stat_summary(fun=mean,geom="line") +
+  stat_summary(fun=mean,geom="point") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0) +
+  ylab("% Edges with Positive \n Prokaryote-Fungal co-occurances") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") + 
+  #scale_color_manual(values=cbbPalette, labels = c("Control", "Fungicde")) +
+  theme_classic() +
+  labs(color = "") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+interkingdom.pos.box <- ggplot(Network.complexity, aes(x = DPF, y = n.Interkingdom.Pos/n.edges, color = Fungicide)) + 
+  geom_boxplot() + 
+  geom_point(position = position_jitterdodge()) +
+  ylab("Linkage density") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") +  
+  #scale_color_manual(values=c(cbbPalette[[2]], cbbPalette[[1]]), labels = c("Fungicide", "Control")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### PROPORTION OF NEGATIVE INTERKINGDOM INTERACTIONS ####
+interkingdom.neg <- ggplot(Network.complexity, aes(x = DateSampled, y = n.Interkingdom.Neg/n.edges, color = Fungicide)) + 
+  stat_summary(fun=mean,geom="line") +
+  stat_summary(fun=mean,geom="point") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0) +
+  ylab("% Edges with Negative \n Prokaryote-Fungal co-occurances") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") + 
+  #scale_color_manual(values=cbbPalette, labels = c("Control", "Fungicde")) +
+  theme_classic() +
+  labs(color = "") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### PROPORTION OF POSITIVE INTRAKINGDOM INTERACTIONS ####
+intrakingdom.pos <- ggplot(Network.complexity, aes(x = DateSampled, y = n.Intrakingdom.Pos/n.edges, color = Fungicide)) + 
+  stat_summary(fun=mean,geom="line") +
+  stat_summary(fun=mean,geom="point") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0) +
+  ylab("% Edges with Positive \n Intrakingdom co-occurances") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") + 
+  #scale_color_manual(values=cbbPalette, labels = c("Control", "Fungicde")) +
+  theme_classic() +
+  labs(color = "") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### PROPORTION OF NEGATIVE INTRAKINGDOM INTERACTIONS ####
+intrakingdom.neg <- ggplot(Network.complexity, aes(x = DateSampled, y = n.Intrakingdom.Neg/n.edges, color = Fungicide)) + 
+  stat_summary(fun=mean,geom="line") +
+  stat_summary(fun=mean,geom="point") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0) +
+  ylab("% Edges with Negative \n Intrakingdom co-occurances") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") + 
+  #scale_color_manual(values=cbbPalette, labels = c("Control", "Fungicde")) +
+  theme_classic() +
+  labs(color = "") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### PROPORTION OF NEGATIVE Fungal-Fungal INTERACTIONS ####
+fungal.neg <- ggplot(Network.complexity, aes(x = DateSampled, y = n.Fungal.Neg/n.edges, color = Fungicide)) + 
+  stat_summary(fun=mean,geom="line") +
+  stat_summary(fun=mean,geom="point") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0) +
+  ylab("% Edges with Negative \n Fungal-Fungal co-occurances") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") + 
+  #scale_color_manual(values=cbbPalette, labels = c("Control", "Fungicde")) +
+  theme_classic() +
+  labs(color = "") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### PROPORTION OF POSITIVE Fungal-Fungal INTERACTIONS ####
+fungal.pos <- ggplot(Network.complexity, aes(x = DateSampled, y = n.Fungal.Pos/n.edges, color = Fungicide)) + 
+  stat_summary(fun=mean,geom="line") +
+  stat_summary(fun=mean,geom="point") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0) +
+  ylab("% Edges with Positive \n Fungal-Fungal co-occurances") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") + 
+  #scale_color_manual(values=cbbPalette, labels = c("Control", "Fungicde")) +
+  theme_classic() +
+  labs(color = "") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### PROPORTION OF POSITIVE PROKARYOTE-PROKARYOTE INTERACTIONS ####
+prok.pos <- ggplot(Network.complexity, aes(x = DateSampled, y = n.Prok.Pos/n.edges, color = Fungicide)) + 
+  stat_summary(fun=mean,geom="line") +
+  stat_summary(fun=mean,geom="point") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0) +
+  ylab("% Edges with Positive \n Prokaryote-Prokaryote co-occurances") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") + 
+  #scale_color_manual(values=cbbPalette, labels = c("Control", "Fungicde")) +
+  theme_classic() +
+  labs(color = "") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+#### PROPORTION OF NEGATIVE PROKARYOTE-PROKARYOTE INTERACTIONS ####
+prok.neg <- ggplot(Network.complexity, aes(x = DateSampled, y = n.Prok.Neg/n.edges, color = Fungicide)) + 
+  stat_summary(fun=mean,geom="line") +
+  stat_summary(fun=mean,geom="point") +
+  stat_summary(fun.data = mean_se, geom = "errorbar", width = 0) +
+  ylab("% Edges with Negative \n Prokaryote-Prokaryote co-occurances") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") + 
+  #scale_color_manual(values=cbbPalette, labels = c("Control", "Fungicde")) +
+  theme_classic() +
+  labs(color = "") +
+  scale_y_continuous(labels = scales::percent) +
+  facet_wrap(~Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+interkingdom.pos.box <- ggplot(Network.complexity, aes(x = DPF, y = n.Tremellomycete_Actinobacteria/n.edges, color = Fungicide)) + 
+  geom_boxplot() + 
+  geom_point(position = position_jitterdodge()) +
+  ylab("Linkage density") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") +  
+  #scale_color_manual(values=c(cbbPalette[[2]], cbbPalette[[1]]), labels = c("Fungicide", "Control")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Treatment_label) +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+#### Bulleribacidiaceae with common possitive associated bacteria ####
+bullprok.box <- ggplot(Network.complexity, aes(x = DPF, y = n.Bull_Prok, color = Fungicide)) + 
+  geom_boxplot() + 
+  geom_point(position = position_jitterdodge()) +
+  ylab("Modularity") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label = "p.signif", label.y = c(0.1), method = "wilcox.test") +  
+  #scale_color_manual(values=c(cbbPalette[[2]], cbbPalette[[1]]), labels = c("Fungicide", "Control")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+Network.complexity$Bull_sphingomonas_meth <- Network.complexity$n.Vishniacozyma_Methylobacterium + Network.complexity$n.Vishniacozyma_Methylobacterium +
+  Network.complexity$n.Dioszegia_Methylobacterium + Network.complexity$n.Dioszegia_Sphingomonas + Network.complexity$n.Hannaella_Methylobacterium + Network.complexity$n.Hannaella_Sphingomonas
+
+Bull.Alpha <- ggplot(Network.complexity, aes(x = DPF, y = n.Tremellomycete_Alphaproteobacteria, color = Fungicide)) + 
+  geom_boxplot() +
+  geom_point(position = position_jitterdodge()) +
+  ylab("Positive \n Bulleribacidiaceae \n Alphaproteobacteria \n edges") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label.y = c(0.1), method = "wilcox.test") +  
+  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+Bull.Actino <- ggplot(Network.complexity, aes(x = DPF, y = n.Tremellomycete_Actinobacteria, color = Fungicide)) + 
+  geom_boxplot() +
+  geom_point(position = position_jitterdodge()) +
+  ylab("Positive \n Bulleribacidiaceae \n Actinobacteria \n edges") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label.y = c(0.1), method = "wilcox.test") +  
+  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+Bull.Cyto <- ggplot(Network.complexity, aes(x = DPF, y = n.Tremellomycete_Cytophagia, color = Fungicide)) + 
+geom_boxplot() +
+  geom_point(position = position_jitterdodge()) +
+  ylab("Positive \n Bulleribacidiaceae \n Cytophagia \n edges") + 
+  xlab("")+
+  stat_compare_means(aes(group = Fungicide), label.y = c(0.1), method = "wilcox.test") +  
+  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  #scale_fill_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+#### FIGURE ####
+ggpubr::ggarrange(Bull.Alpha, 
+                  Bull.Actino,
+                  Bull.Cyto,
+                  common.legend = T, nrow = 1, ncol = 3)
+ggsave("Bull-Prokedges.pdf", dpi = 300)
+```
+
+Edge-compositional change due to fungicide - whole networks, and with Bulleribacideaceae
+With Soybean First
+```{r}
+temporal.edges <- Network.edges %>%
+  subset(Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & Class_from %in% c("Alphaproteobacteria", "Actinobacteria") & direction == "Positive") %>% # subset edges to those frequently observed
+  mutate(edge.id = interaction(to, from, sep="-")) %>% # create a unique edge id
+  mutate(edge.present = 1) %>% # create a column for these present = 1 edges
+  select(SampleID, edge.id, edge.present) %>% # select sample, edge, edge present columns only
+  complete(SampleID, edge.id, fill = list(edge.present = 0)) %>% # fill in all other combinations that are not present and give it a 0 for not present
+  left_join(data.frame(fungi.no.norm@sam_data), by = "SampleID") %>% # join the sample data 
+  group_by(edge.id, GrowthStage, Treatment, Fungicide) %>% # group by each edge id, growthstage, treatement and fungicide combination
+  nest() %>% # nest this
+  mutate(n.sample = purrr::map(data, ~length(.x$edge.present))) %>% # loop over each combination and count how many samples
+  mutate(n.edges = purrr::map(data, ~sum(.x$edge.present))) %>% # loop over each combination and count how many edges are present
+  unnest(c(n.sample, n.edges)) %>% # unnest the number of samples and edges
+  mutate(percent.edges = 100*(n.edges/n.sample)) %>% # calculate the edge occupancy (i.e., number of samples the edge was observed in)
+  pivot_wider(id_cols = c(edge.id, Treatment, GrowthStage), names_from = c(Fungicide), values_from = c(percent.edges)) %>% # put the fungicide and control samples as columns
+  arrange(GrowthStage) %>% # organize by growthstage
+  mutate(filter.edge = ifelse(GrowthStage == "R3" & F == 0 & C == 0, "Filter", "Keep")) %>% # filtering out those edges that were not present before fungicides were sprayed
+  subset(filter.edge == "Keep") %>% # filter
+  mutate(diff.percent.edges = F-C) %>% # take the difference in edge occupancy
+  separate(edge.id, into = c("to", "from"), sep = "-") %>% # separate the edge id into OTUs, to put on taxonomy information later
+  mutate(edge.id = interaction(to, from, sep="-")) # create the edge id column again for convienence
+
+# Create a second filter for T1 where only edges that decreased in occupancy from the start are kept
+temporal.edge.subset.T1 <- temporal.edges %>%
+  subset(Treatment == "T1") %>%
+  pivot_wider(id_cols = c(edge.id, to, from), names_from = GrowthStage, values_from = diff.percent.edges) %>%
+  subset(R3 > R4 & R4 < 0)
+
+T1.differentially.abundant <- unique(c(as.character(fungi_leaf_soy_R4_T1_sig), as.character(fungi_leaf_soy_R6_T1_sig)))
+
+edge.subset.T1 <- as.character(temporal.edge.subset.T1$edge.id)
+
+edges.fungal.core.T1 <- temporal.edges %>% subset(edge.id %in% edge.subset.T1 & Treatment == "T1") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU_ID")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU_ID")) %>%
+  subset(to %in% core.T1.combined) %>%
+    as.data.frame() %>%
+  select(BestMatch) %>%
+  unique()
+
+edges.bacteria.core.T1 <- temporal.edges %>% subset(edge.id %in% edge.subset.T1 & Treatment == "T1") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU_ID")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU_ID")) %>%
+  subset(from %in% core.T1.combined | to %in% core.T1.combined) %>%
+    as.data.frame() %>%
+  select(Taxonomy.x) %>%
+  unique()
+
+temporal.edges.lost.T1 <- temporal.edges %>% subset(edge.id %in% edge.subset.T1 & Treatment == "T1") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU_ID")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU_ID")) %>%
+  subset(to %in% T1.differentially.abundant) %>%
+  ggplot(aes(GrowthStage, reorder(interaction(Label.y, Label.x, sep = "-"), from), fill= diff.percent.edges)) + 
+    geom_tile(color = "black", width = 0.99) +
+    scale_fill_gradient2(name = "",
+                      low = cbbPalette[[2]],
+                      mid = "white",
+                      high = cbbPalette[[1]],
+                      limits=c(-100, 100)) +
+    theme_classic() +
+    theme(axis.text=element_text(size=8)) +
+  facet_grid(Class.x*Genus.y~., scales = "free") + 
+  xlab("") + 
+  ylab("") +
+  scale_x_discrete(labels=c("0-dpf","13-dpf","24-dpf"))
+
+# Create a second filter for T2 where only edges that decreased in occupancy from the start are kept
+temporal.edge.subset.T2 <- temporal.edges %>%
+  subset(Treatment == "T2") %>%
+  pivot_wider(id_cols = c(edge.id, to, from), names_from = GrowthStage, values_from = diff.percent.edges) %>%
+  subset(R3 > R4 & R4 < 0)
+
+T2.differentially.abundant <- unique(c(as.character(fungi_leaf_soy_R4_T2_sig), as.character(fungi_leaf_soy_R6_T2_sig)))
+
+edge.subset.T2 <- as.character(temporal.edge.subset.T2$edge.id)
+
+edges.fungal.core.T2 <- temporal.edges %>% subset(edge.id %in% edge.subset.T2 & Treatment == "T2") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(to %in% core.T2.combined) %>%
+    as.data.frame() %>%
+  select(Label.y) %>%
+  unique()
+
+edges.bacteria.core.T2 <- temporal.edges %>% subset(edge.id %in% edge.subset.T2 & Treatment == "T2") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(from %in% core.T2.combined | to %in% core.T2.combined) %>%
+    as.data.frame() %>%
+  select(Label.x) %>%
+  unique()
+
+temporal.edges.lost.T2 <- temporal.edges %>% subset(edge.id %in% edge.subset.T2 & Treatment == "T2") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(to %in% T2.differentially.abundant) %>%
+  ggplot(aes(GrowthStage, reorder(interaction(Label.y, Label.x, sep = "-"), from), fill= diff.percent.edges)) + 
+    geom_tile(color = "black", width = 0.99) +
+    scale_fill_gradient2(name = "",
+                      low = cbbPalette[[2]],
+                      mid = "white",
+                      high = cbbPalette[[1]],
+                      limits=c(-100, 100)) +
+    theme_classic() +
+    theme(axis.text=element_text(size=8)) +
+  facet_grid(Class.x*Genus.y~., scales = "free") + 
+  xlab("") + 
+  ylab("") +
+  scale_x_discrete(labels=c("0-dpf","13-dpf","24-dpf"))
+
+
+
+ggpubr::ggarrange(temporal.edges.lost.T1, temporal.edges.lost.T2, common.legend = T)
+ggsave("NetworkOccupancy_061820.pdf", dpi = 300, width = 15, height = 15)
+```
+
+Corn
+```{r}
+temporal.edges <- Network.edges.corn %>%
+  subset(Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & Class_from %in% c("Alphaproteobacteria", "Actinobacteria") & direction == "Positive") %>% # subset edges to those frequently observed
+  mutate(edge.id = interaction(to, from, sep="-")) %>% # create a unique edge id
+  mutate(edge.present = 1) %>% # create a column for these present = 1 edges
+  select(SampleID, edge.id, edge.present) %>% # select sample, edge, edge present columns only
+  complete(SampleID, edge.id, fill = list(edge.present = 0)) %>% # fill in all other combinations that are not present and give it a 0 for not present
+  left_join(data.frame(fungi.no.norm@sam_data), by = "SampleID") %>% # join the sample data 
+  group_by(edge.id, GrowthStage, Treatment, Fungicide) %>% # group by each edge id, growthstage, treatement and fungicide combination
+  nest() %>% # nest this
+  mutate(n.sample = purrr::map(data, ~length(.x$edge.present))) %>% # loop over each combination and count how many samples
+  mutate(n.edges = purrr::map(data, ~sum(.x$edge.present))) %>% # loop over each combination and count how many edges are present
+  unnest(c(n.sample, n.edges)) %>% # unnest the number of samples and edges
+  mutate(percent.edges = 100*(n.edges/n.sample)) %>% # calculate the edge occupancy (i.e., number of samples the edge was observed in)
+  pivot_wider(id_cols = c(edge.id, Treatment, GrowthStage), names_from = c(Fungicide), values_from = c(percent.edges)) %>% # put the fungicide and control samples as columns
+  arrange(GrowthStage) %>% # organize by growthstage
+  mutate(filter.edge = ifelse(GrowthStage == "V6" & F == 0 & C == 0, "Filter", "Keep")) %>% # filtering out those edges that were not present before fungicides were sprayed
+  subset(filter.edge == "Keep") %>% # filter
+  mutate(diff.percent.edges = F-C) %>% # take the difference in edge occupancy
+  separate(edge.id, into = c("to", "from"), sep = "-") %>% # separate the edge id into OTUs, to put on taxonomy information later
+  mutate(edge.id = interaction(to, from, sep="-")) # create the edge id column again for convienence
+
+# Create a second filter for T1 where only edges that decreased in occupancy from the start are kept
+temporal.edge.subset.T1 <- temporal.edges %>%
+  subset(Treatment == "T1") %>%
+  pivot_wider(id_cols = c(edge.id, to, from), names_from = GrowthStage, values_from = diff.percent.edges) %>%
+  subset(V6 > V8 & V8 < 0)
+
+T1.differentially.abundant <- unique(c(as.character(fungi_leaf_corn_V8_ANCOM_sig)))
+
+edge.subset.T1 <- as.character(temporal.edge.subset.T1$edge.id)
+
+edges.fungal.core.T1 <- temporal.edges %>% subset(edge.id %in% edge.subset.T1 & Treatment == "T1") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(to %in% core.T1.combined) %>%
+    as.data.frame() %>%
+  select(Label.y) %>%
+  unique()
+
+edges.bacteria.core.T1 <- temporal.edges %>% subset(edge.id %in% edge.subset.T1 & Treatment == "T1") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(from %in% core.T1.combined | to %in% core.T1.combined) %>%
+    as.data.frame() %>%
+  select(Label.x) %>%
+  unique()
+
+temporal.edges.lost.T1.corn <- temporal.edges %>% subset(edge.id %in% edge.subset.T1 & Treatment == "T1") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(to %in% T1.differentially.abundant) %>%
+  ggplot(aes(GrowthStage, reorder(interaction(Label.y, Label.x, sep = "-"), from), fill= diff.percent.edges)) + 
+    geom_tile(color = "black", width = 0.99) +
+    scale_fill_gradient2(name = "",
+                      low = cbbPalette[[2]],
+                      mid = "white",
+                      high = cbbPalette[[1]],
+                      limits=c(-100, 100)) +
+    theme_classic() +
+    theme(axis.text=element_text(size=8)) +
+  facet_grid(Class.x*Genus.y~., scales = "free") + 
+  xlab("") + 
+  ylab("") +
+  scale_x_discrete(labels=c("0-dpf","13-dpf","24-dpf"))
+
+# Create a second filter for T2 where only edges that decreased in occupancy from the start are kept
+temporal.edge.subset.T2.corn <- temporal.edges %>%
+  subset(Treatment == "T2") %>%
+  pivot_wider(id_cols = c(edge.id, to, from), names_from = GrowthStage, values_from = diff.percent.edges) %>%
+  subset(V6 > V8 & V8 < 0)
+
+T2.differentially.abundant <- unique(c(as.character(fungi_leaf_soy_R4_T2_sig), as.character(fungi_leaf_soy_R6_T2_sig)))
+
+edge.subset.T2 <- as.character(temporal.edge.subset.T2$edge.id)
+
+edges.fungal.core.T2 <- temporal.edges %>% subset(edge.id %in% edge.subset.T2 & Treatment == "T2") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(to %in% core.T2.combined) %>%
+    as.data.frame() %>%
+  select(Label.y) %>%
+  unique()
+
+edges.bacteria.core.T2 <- temporal.edges %>% subset(edge.id %in% edge.subset.T2 & Treatment == "T2") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(from %in% core.T2.combined | to %in% core.T2.combined) %>%
+    as.data.frame() %>%
+  select(Label.x) %>%
+  unique()
+
+temporal.edges.lost.T2.corn <- temporal.edges %>% subset(edge.id %in% edge.subset.T2 & Treatment == "T2") %>%
+  left_join(bacteria.taxonomy, by = c("from" = "OTU")) %>%
+  left_join(fungi.taxonomy, by = c("to" = "OTU")) %>%
+  subset(to %in% T2.differentially.abundant) %>%
+  ggplot(aes(GrowthStage, reorder(interaction(Label.y, Label.x, sep = "-"), from), fill= diff.percent.edges)) + 
+    geom_tile(color = "black", width = 0.99) +
+    scale_fill_gradient2(name = "",
+                      low = cbbPalette[[2]],
+                      mid = "white",
+                      high = cbbPalette[[1]],
+                      limits=c(-100, 100)) +
+    theme_classic() +
+    theme(axis.text=element_text(size=8)) +
+  facet_grid(Class.x*Genus.y~., scales = "free") + 
+  xlab("") + 
+  ylab("") +
+  scale_x_discrete(labels=c("0-dpf","13-dpf","24-dpf"))
+
+
+
+ggpubr::ggarrange(temporal.edges.lost.T1, temporal.edges.lost.T2, temporal.edges.lost.T1.corn, temporal.edges.lost.T2.corn,  common.legend = T, nrow = 2, ncol = 2)
+ggsave("NetworkOccupancy_061820.pdf", dpi = 300, width = 15, height = 15)
+```
+
+
+This is a function to calculate node and edge stats for a subgraph
+```{r}
+#### Function to calculate the node and edge stats ####
+node.and.edge.stats <- function(network.object.hub){
+
+networks.object.noweight <- delete_edge_attr(network.object.hub, "weight")
+  
+#### Hub stats ####
+wtc <- cluster_walktrap(networks.object.noweight)
+
+hubs <- data.frame(V(networks.object.noweight)$name); colnames(hubs) <- c("name")
+hubs$hubscore <- hub_score(networks.object.noweight)$vector 
+hubs$betweeness <- betweenness(networks.object.noweight) 
+hubs$pr <- page_rank(networks.object.noweight)$vector 
+hubs$degree <- degree(networks.object.noweight)
+hubs$module <- wtc$membership
+
+nodes.stats <- hubs
+node.stats2 <- left_join(nodes.stats, mean.rel.abund.combined, by = c("name" = "OTU"))
+
+#### edge stats ####
+edge.network <- data.frame(ends(network.object.hub, E(network.object.hub))) 
+colnames(edge.network) <- c("from", "to")
+edge.network <- left_join(edge.network, taxonomy.combined, by = c("from" = "OTU"))
+colnames(edge.network) <- c("from", "to", "Kingdom_from", "Phylum_from", "Class_from", "Order_from", 
+                            "Family_from", "Genus_from", "Label_from", "Species_from")
+edge.network <- left_join(edge.network, taxonomy.combined, by = c("to" = "OTU"))
+colnames(edge.network) <- c("from", "to", "Kingdom_from", "Phylum_from", "Class_from", "Order_from", 
+                            "Family_from", "Genus_from", "Label_from", "Species_from", 
+                            "Kingdom_to", "Phylum_to", "Class_to", "Order_to", 
+                            "Family_to", "Genus_to", "Label_to", "Species_to")
+edge.network$weights <- E(network.object.hub)$weight
+edge.network$direction <- ifelse(edge.network$weights > 0, "Positive", "Negative")
+edge.network$inter <- ifelse(edge.network$Kingdom_from == edge.network$Kingdom_to, "Intrakingdom", "Interkingdom")
+edge.network$interXdirection <- interaction(edge.network$inter, edge.network$direction)
+edge.network.final <- edge.network
+
+#### return ####
+return.list <- list(node.stats2, edge.network.final)
+return(return.list)
+}
+```
+
+SUBGRAPHS for each growth stage-management combo 
+```{r}
+#### R3-T1-F ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3" & Treatment == "T1" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3" & Treatment == "T1" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+
+# Subsetting the network
+soyleaf.R3.T1.F <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R3.T1.F <- delete.vertices(soyleaf.R3.T1.F, which(degree(soyleaf.R3.T1.F, mode = "all")== 0))
+
+#### R3-T1-C ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3" & Treatment == "T1" & Fungicide == "C") %>%
+phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3" & Treatment == "T1" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R3.T1.C <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R3.T1.C <- delete.vertices(soyleaf.R3.T1.C, which(degree(soyleaf.R3.T1.C, mode = "all")== 0))
+
+#### R3-T2-F ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3" & Treatment == "T2" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3" & Treatment == "T2" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R3.T2.F <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R3.T2.F <- delete.vertices(soyleaf.R3.T2.F, which(degree(soyleaf.R3.T2.F, mode = "all")== 0))
+
+
+#### R3-T2-C ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3" & Treatment == "T2" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3" & Treatment == "T2" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R3.T2.C <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R3.T2.C <- delete.vertices(soyleaf.R3.T2.C, which(degree(soyleaf.R3.T2.C, mode = "all")== 0))
+#### R4-T1-F ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4" & Treatment == "T1" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4" & Treatment == "T1" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R4.T1.F <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R4.T1.F <- delete.vertices(soyleaf.R4.T1.F, which(degree(soyleaf.R4.T1.F, mode = "all")== 0))
+
+#### R4-T1-C ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4" & Treatment == "T1" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4" & Treatment == "T1" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R4.T1.C <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R4.T1.C <- delete.vertices(soyleaf.R4.T1.C, which(degree(soyleaf.R4.T1.C, mode = "all")== 0))
+
+#### R4-T2-F ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4" & Treatment == "T2" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4" & Treatment == "T2" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R4.T2.F <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R4.T2.F <- delete.vertices(soyleaf.R4.T2.F, which(degree(soyleaf.R4.T2.F, mode = "all")== 0))
+
+#### R4-T2-C ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4" & Treatment == "T2" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  otu_table() %>%
+  rownames()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4" & Treatment == "T2" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R4.T2.C <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R4.T2.C <- delete.vertices(soyleaf.R4.T2.C, which(degree(soyleaf.R4.T2.C, mode = "all")== 0))
+
+
+#### R6-T1-F ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6" & Treatment == "T1" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6" & Treatment == "T1" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R6.T1.F <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R6.T1.F <- delete.vertices(soyleaf.R6.T1.F, which(degree(soyleaf.R6.T1.F, mode = "all")== 0))
+
+#### R6-T1-C ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6" & Treatment == "T1" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6" & Treatment == "T1" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R6.T1.C <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R6.T1.C <- delete.vertices(soyleaf.R6.T1.C, which(degree(soyleaf.R6.T1.C, mode = "all")== 0))
+
+#### R6-T2-F ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6" & Treatment == "T2" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6" & Treatment == "T2" & Fungicide == "F") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R6.T2.F <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R6.T2.F <- delete.vertices(soyleaf.R6.T2.F, which(degree(soyleaf.R6.T2.F, mode = "all")== 0))
+
+#### R6-T2-C ####
+fungi.soy <- fungi.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6" & Treatment == "T2" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+prok.soy <- bacteria.no.norm %>%
+  subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6" & Treatment == "T2" & Fungicide == "C") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) %>%
+  taxa_names()
+
+subset.taxa <- c(fungi.soy, prok.soy)
+# Subsetting the network
+soyleaf.R6.T2.C <- induced_subgraph(meta.net$igraph.object, which(V(meta.net$igraph.object)$name %in% subset.taxa))
+# Delete isolated nodes
+#soyleaf.R6.T2.C <- delete.vertices(soyleaf.R6.T2.C, which(degree(soyleaf.R6.T2.C, mode = "all")== 0))
+
+
+
+```
+
+Calculate node and edge stats for each subgraph
+```{r}
+#### R3-T1-F ####
+R3.F.T1.net.node.edge.stats <- node.and.edge.stats(soyleaf.R3.T1.F)
+R3.F.T1.net.nodes <- R3.F.T1.net.node.edge.stats[[1]] 
+R3.F.T1.net.edges <- R3.F.T1.net.node.edge.stats[[2]] 
+R3.F.T1.net.nodes$Fungicide <- "Fungicide"
+R3.F.T1.net.edges$Fungicide <- "Fungicide"
+R3.F.T1.net.nodes$Treatment <- "Conventional"
+R3.F.T1.net.edges$Treatment <- "Conventional"
+R3.F.T1.net.nodes$DPF <- "0-dpf"
+R3.F.T1.net.edges$DPF <- "0-dpf"
+
+#### R3-T1-C ####
+R3.C.T1.net.node.edge.stats <- node.and.edge.stats(soyleaf.R3.T1.C)
+R3.C.T1.net.nodes <- R3.C.T1.net.node.edge.stats[[1]] 
+R3.C.T1.net.edges <- R3.C.T1.net.node.edge.stats[[2]] 
+R3.C.T1.net.nodes$Fungicide <- "Control"
+R3.C.T1.net.edges$Fungicide <- "Control"
+R3.C.T1.net.nodes$Treatment <- "Conventional"
+R3.C.T1.net.edges$Treatment <- "Conventional"
+R3.C.T1.net.nodes$DPF <- "0-dpf"
+R3.C.T1.net.edges$DPF <- "0-dpf"
+
+#### R3-T2-F ####
+R3.F.T2.net.node.edge.stats <- node.and.edge.stats(soyleaf.R3.T2.F)
+R3.F.T2.net.nodes <- R3.F.T2.net.node.edge.stats[[1]] 
+R3.F.T2.net.edges <- R3.F.T2.net.node.edge.stats[[2]] 
+R3.F.T2.net.nodes$Fungicide <- "Fungicide"
+R3.F.T2.net.edges$Fungicide <- "Fungicide"
+R3.F.T2.net.nodes$Treatment <- "No-till"
+R3.F.T2.net.edges$Treatment <- "No-till"
+R3.F.T2.net.nodes$DPF <- "0-dpf"
+R3.F.T2.net.edges$DPF <- "0-dpf"
+
+#### R3-T2-C ####
+R3.C.T2.net.node.edge.stats <- node.and.edge.stats(soyleaf.R3.T2.C)
+R3.C.T2.net.nodes <- R3.C.T2.net.node.edge.stats[[1]] 
+R3.C.T2.net.edges <- R3.C.T2.net.node.edge.stats[[2]] 
+R3.C.T2.net.nodes$Fungicide <- "Control"
+R3.C.T2.net.edges$Fungicide <- "Control"
+R3.C.T2.net.nodes$Treatment <- "No-till"
+R3.C.T2.net.edges$Treatment <- "No-till"
+R3.C.T2.net.nodes$DPF <- "0-dpf"
+R3.C.T2.net.edges$DPF <- "0-dpf"
+
+#### R4-T1-F ####
+R4.F.T1.net.node.edge.stats <- node.and.edge.stats(soyleaf.R4.T1.F)
+R4.F.T1.net.nodes <- R4.F.T1.net.node.edge.stats[[1]] 
+R4.F.T1.net.edges <- R4.F.T1.net.node.edge.stats[[2]] 
+R4.F.T1.net.nodes$Fungicide <- "Fungicide"
+R4.F.T1.net.edges$Fungicide <- "Fungicide"
+R4.F.T1.net.nodes$Treatment <- "Conventional"
+R4.F.T1.net.edges$Treatment <- "Conventional"
+R4.F.T1.net.nodes$DPF <- "13-dpf"
+R4.F.T1.net.edges$DPF <- "13-dpf"
+
+#### R4-T1-C ####
+R4.C.T1.net.node.edge.stats <- node.and.edge.stats(soyleaf.R4.T1.C)
+R4.C.T1.net.nodes <- R4.C.T1.net.node.edge.stats[[1]] 
+R4.C.T1.net.edges <- R4.C.T1.net.node.edge.stats[[2]] 
+R4.C.T1.net.nodes$Fungicide <- "Control"
+R4.C.T1.net.edges$Fungicide <- "Control"
+R4.C.T1.net.nodes$Treatment <- "Conventional"
+R4.C.T1.net.edges$Treatment <- "Conventional"
+R4.C.T1.net.nodes$DPF <- "13-dpf"
+R4.C.T1.net.edges$DPF <- "13-dpf"
+
+#### R4-T2-F ####
+R4.F.T2.net.node.edge.stats <- node.and.edge.stats(soyleaf.R4.T2.F)
+R4.F.T2.net.nodes <- R4.F.T2.net.node.edge.stats[[1]] 
+R4.F.T2.net.edges <- R4.F.T2.net.node.edge.stats[[2]] 
+R4.F.T2.net.nodes$Fungicide <- "Fungicide"
+R4.F.T2.net.edges$Fungicide <- "Fungicide"
+R4.F.T2.net.nodes$Treatment <- "No-till"
+R4.F.T2.net.edges$Treatment <- "No-till"
+R4.F.T2.net.nodes$DPF <- "13-dpf"
+R4.F.T2.net.edges$DPF <- "13-dpf"
+
+#### R4-T2-C ####
+R4.C.T2.net.node.edge.stats <- node.and.edge.stats(soyleaf.R4.T2.C)
+R4.C.T2.net.nodes <- R4.C.T2.net.node.edge.stats[[1]] 
+R4.C.T2.net.edges <- R4.C.T2.net.node.edge.stats[[2]] 
+R4.C.T2.net.nodes$Fungicide <- "Control"
+R4.C.T2.net.edges$Fungicide <- "Control"
+R4.C.T2.net.nodes$Treatment <- "No-till"
+R4.C.T2.net.edges$Treatment <- "No-till"
+R4.C.T2.net.nodes$DPF <- "13-dpf"
+R4.C.T2.net.edges$DPF <- "13-dpf"
+
+#### R6-T1-F ####
+R6.F.T1.net.node.edge.stats <- node.and.edge.stats(soyleaf.R6.T1.F)
+R6.F.T1.net.nodes <- R6.F.T1.net.node.edge.stats[[1]] 
+R6.F.T1.net.edges <- R6.F.T1.net.node.edge.stats[[2]] 
+R6.F.T1.net.nodes$Fungicide <- "Fungicide"
+R6.F.T1.net.edges$Fungicide <- "Fungicide"
+R6.F.T1.net.nodes$Treatment <- "Conventional"
+R6.F.T1.net.edges$Treatment <- "Conventional"
+R6.F.T1.net.nodes$DPF <- "28-dpf"
+R6.F.T1.net.edges$DPF <- "28-dpf"
+
+#### R6-T1-C ####
+R6.C.T1.net.node.edge.stats <- node.and.edge.stats(soyleaf.R6.T1.C)
+R6.C.T1.net.nodes <- R6.C.T1.net.node.edge.stats[[1]] 
+R6.C.T1.net.edges <- R6.C.T1.net.node.edge.stats[[2]] 
+R6.C.T1.net.nodes$Fungicide <- "Control"
+R6.C.T1.net.edges$Fungicide <- "Control"
+R6.C.T1.net.nodes$Treatment <- "Conventional"
+R6.C.T1.net.edges$Treatment <- "Conventional"
+R6.C.T1.net.nodes$DPF <- "28-dpf"
+R6.C.T1.net.edges$DPF <- "28-dpf"
+
+#### R6-T2-F ####
+R6.F.T2.net.node.edge.stats <- node.and.edge.stats(soyleaf.R6.T2.F)
+R6.F.T2.net.nodes <- R6.F.T2.net.node.edge.stats[[1]] 
+R6.F.T2.net.edges <- R6.F.T2.net.node.edge.stats[[2]] 
+R6.F.T2.net.nodes$Fungicide <- "Fungicide"
+R6.F.T2.net.edges$Fungicide <- "Fungicide"
+R6.F.T2.net.nodes$Treatment <- "No-till"
+R6.F.T2.net.edges$Treatment <- "No-till"
+R6.F.T2.net.nodes$DPF <- "28-dpf"
+R6.F.T2.net.edges$DPF <- "28-dpf"
+
+#### R6-T2-C ####
+R6.C.T2.net.node.edge.stats <- node.and.edge.stats(soyleaf.R6.T2.C)
+R6.C.T2.net.nodes <- R6.C.T2.net.node.edge.stats[[1]] 
+R6.C.T2.net.edges <- R6.C.T2.net.node.edge.stats[[2]] 
+R6.C.T2.net.nodes$Fungicide <- "Control"
+R6.C.T2.net.edges$Fungicide <- "Control"
+R6.C.T2.net.nodes$Treatment <- "No-till"
+R6.C.T2.net.edges$Treatment <- "No-till"
+R6.C.T2.net.nodes$DPF <- "28-dpf"
+R6.C.T2.net.edges$DPF <- "28-dpf"
+```
+
+```{r}
+testpallete <- c("#117733",
+"#882255",
+"#DDCC77",
+"#44AA99",
+cbbPalette[[3]],
+"grey",
+cbbPalette[[6]],
+cbbPalette[[7]],
+"purple",
+"#542788")
+
+##### R3T1F #####
+meta.nodes <- R3.F.T1.net.nodes
+meta.edges <- R3.F.T1.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+activate(nodes) %>%
+  filter(Class2 %in% node.label.list) %>%
+ggraph(layout = 'kk' ) + 
+    geom_edge_link(aes(alpha = ..index..), show.legend = FALSE) + 
+    geom_node_point(aes(colour = Class3, size = mean.relabund)) + 
+    theme_graph()
+
+circle.trem.R3.T1.F <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+  #facet_edges(~inter)
+
+##### R3T1C #####
+meta.nodes <- R3.C.T1.net.nodes
+meta.edges <- R3.C.T1.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R3.T1.C <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+
+
+
+##### R4T1F #####
+meta.nodes <- R4.F.T1.net.nodes
+meta.edges <- R4.F.T1.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R4.T1.F <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+##### R4T1C #####
+meta.nodes <- R4.C.T1.net.nodes
+meta.edges <- R4.C.T1.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R4.T1.C <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+
+
+
+##### R6T1F #####
+meta.nodes <- R6.F.T1.net.nodes
+meta.edges <- R6.F.T1.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R6.T1.F <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+ ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+##### R6T1C #####
+meta.nodes <- R6.C.T1.net.nodes
+meta.edges <- R6.C.T1.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R6.T1.C <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+
+##### R3T2F #####
+meta.nodes <- R3.F.T2.net.nodes
+meta.edges <- R3.F.T2.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R3.T2.F <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+
+##### R3T2C #####
+meta.nodes <- R3.C.T2.net.nodes
+meta.edges <- R3.C.T2.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R3.T2.C <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+
+
+
+##### R4T2F #####
+meta.nodes <- R4.F.T2.net.nodes
+meta.edges <- R4.F.T2.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R4.T2.F <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+
+##### R4T2C #####
+meta.nodes <- R4.C.T2.net.nodes
+meta.edges <- R4.C.T2.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R4.T2.C <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+
+
+
+
+##### R4T2F #####
+meta.nodes <- R6.F.T2.net.nodes
+meta.edges <- R6.F.T2.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R6.T2.F <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+##### R4T2C #####
+meta.nodes <- R6.C.T2.net.nodes
+meta.edges <- R6.C.T2.net.edges
+meta.nodes$Class <- as.character(meta.nodes$Class)
+meta.nodes$Class2 <- ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Fungi", "unidentified fungal class",
+                            ifelse(meta.nodes$Class == "unidentified" & meta.nodes$Kingdom == "Bacteria", "unidentified prokaryotic class", meta.nodes$Class))
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "Dothideomycetes", "Sordariomycetes", "Tremellomycetes", "unidentified fungal class", "unidentified prokaryotic class")
+
+meta.nodes$Class3 <- ifelse(meta.nodes$Class2 %!in% node.label.list, "Other", meta.nodes$Class2)
+
+meta.net.graph <- tbl_graph(nodes = meta.nodes, edges = meta.edges)
+
+circle.trem.R6.T2.C <- meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+filter(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+    activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Genus %in% c("Sphingomonas", "Methylobacterium")) %>%
+
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = interXdirection, alpha = abs(weights))) +
+    scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Genus), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none") 
+
+
+
+#### PLOT T1 ####
+ggpubr::ggarrange(circle.trem.R3.T1.F, circle.trem.R3.T1.C,
+                  circle.trem.R4.T1.F, circle.trem.R4.T1.C,
+                  circle.trem.R6.T1.F, circle.trem.R6.T1.C, nrow = 3, ncol = 2)
+
+ggpubr::ggarrange(circle.trem.R3.T2.F, circle.trem.R3.T2.C,
+                  circle.trem.R4.T2.F, circle.trem.R4.T2.C,
+                  circle.trem.R6.T2.F, circle.trem.R6.T2.C, nrow = 3, ncol = 2)
+```
+
+Edge composition for tremellomycetes
+So we have created sub-graphs for each management-fungicide-growth stage combination and have calculated statistics for each of those graphs, now we are going to put them together for plotting. 
+```{r}
+meta.nodes <- rbind.data.frame(R3.F.T1.net.nodes, R3.C.T1.net.nodes, 
+                             R3.F.T2.net.nodes, R3.C.T2.net.nodes,
+                             R4.F.T1.net.nodes, R4.C.T1.net.nodes, 
+                             R4.F.T2.net.nodes, R4.C.T2.net.nodes,
+                             R6.F.T1.net.nodes, R6.C.T1.net.nodes, 
+                             R6.F.T2.net.nodes, R6.C.T2.net.nodes)
+
+meta.edges <- rbind.data.frame(R3.F.T1.net.edges, R3.C.T1.net.edges, 
+                             R3.F.T2.net.edges, R3.C.T2.net.edges,
+                             R4.F.T1.net.edges, R4.C.T1.net.edges, 
+                             R4.F.T2.net.edges, R4.C.T2.net.edges,
+                             R6.F.T1.net.edges, R6.C.T1.net.edges, 
+                             R6.F.T2.net.edges, R6.C.T2.net.edges)
+```
+
+```{r}
+temporal.edges <- meta.edges %>%
+  subset(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+  dplyr::group_by(Fungicide, DPF, Treatment, direction, Label_from, Label_to) %>%
+  nest() %>%
+  mutate(n.edges = purrr::map(data, ~nrow(.x))) %>%
+  unnest(n.edges) 
+  
+temporal.edges$edge.id <- interaction(temporal.edges$Label_from, temporal.edges$Label_to)
+
+ggplot(temporal.edges, aes(DPF, edge.id, fill= n.edges)) + 
+  geom_tile() +
+  facet_wrap(~Treatment*Fungicide)
+
+temporal.edge.weights <- meta.edges %>%
+  subset(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+  dplyr::group_by(Fungicide, DPF, Treatment, direction, Label_from, Label_to) %>%
+  nest() %>%
+  mutate(n.edges = purrr::map(data, ~nrow(.x))) %>%
+  unnest(n.edges) 
+  
+temporal.edges$edge.id <- interaction(temporal.edges$Label_from, temporal.edges$Label_to)
+
+ggplot(temporal.edges, aes(DPF, edge.id, fill= n.edges)) + 
+  geom_tile() +
+  facet_wrap(~Treatment*Fungicide)
+  
+  pivot_wider(id_cols = c(Label_from,Label_to, Treatment, direction, Fungicide), names_from = DPF, values_from = c(n.edges), values_fill = list(n.edges = 0)) 
+
+
+
+
+temporal.edges <- pivot_wider(temporal.edges, id_cols = c(edge.id, Treatment), names_from = Fungicide, values_from = c(`0-dpf`, `13-dpf`, `28-dpf`), values_fill = list(`0-dpf` = 0, `13-dpf` = 0, `28-dpf` = 0)) 
+
+temporal.edges$Fungicide.edge.presence <- interaction(temporal.edges$`0-dpf_Fungicide`, temporal.edges$`13-dpf_Fungicide`, temporal.edges$`28-dpf_Fungicide`)
+temporal.edges$Control.edge.presence <- interaction(temporal.edges$`0-dpf_Control`, temporal.edges$`13-dpf_Control`, temporal.edges$`28-dpf_Control`)
+
+temporal.edges %>%
+  select(edge.id,Treatment, )
+```
+
+
+```{r}
+bulleri.edges <- meta.edges %>%
+  subset(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium")) %>%
+  group_by(Fungicide, DPF, direction, Treatment) %>%
+  ggplot(aes(x = interaction(Fungicide, DPF), fill = Label_from)) +
+  geom_bar() + 
+  facet_wrap(~direction*Treatment)
+
+Bulleribasidiaceae.positive.edges <- meta.edges %>%
+  subset(Family_to %in% "Bulleribasidiaceae" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+  group_by(Fungicide, DPF, direction, Treatment) %>%
+  select(to)
+
+Bulleribasidiaceae.positive.edges.otus <- unique(Bulleribasidiaceae.positive.edges$to)
+Bulleribasidiaceae.positive.edges.otus.seqs <- fungi.no.norm %>%
+  subset_taxa(OTU %in% Bulleribasidiaceae.positive.edges.otus) %>%
+  refseq()
+
+writeXStringSet(Bulleribasidiaceae.positive.edges.otus.seqs, "Bulleribasidiaceae_positive_edges_otus_seqs.fasta")
+
+bulleri.edges <- meta.edges %>%
+  subset(Genus_to %in% "Hannaella" & Genus_from %in% c("Sphingomonas", "Methylobacterium")) %>%
+  group_by(Fungicide, DPF, direction, Treatment) %>%
+  ggplot(aes(x = interaction(Fungicide, DPF), fill = Label_from)) +
+  geom_bar() + 
+  facet_wrap(~direction*Treatment)
+
+Hannaella Vishniacozyma Dioszegia
+
+meta.edges %>%
+  subset(Genus_to %in% "Vishniacozyma" & Genus_from %in% c("Sphingomonas", "Methylobacterium")) %>%
+  group_by(Fungicide, DPF, direction, Treatment) %>%
+  ggplot(aes(x = interaction(Fungicide, DPF), fill = Label_from)) +
+  geom_bar() + 
+  facet_wrap(~direction*Treatment)
+
+Vishniacozyma.positive.edges <- meta.edges %>%
+  subset(Genus_to %in% "Vishniacozyma" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+  group_by(Fungicide, DPF, direction, Treatment) %>%
+  select(to)
+
+Vishniacozyma.positive.edges.otus <- unique(Vishniacozyma.positive.edges$to)
+
+
+meta.edges %>%
+  subset(Genus_to %in% "Dioszegia" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+  group_by(Fungicide, DPF, direction, Treatment) %>%
+  ggplot(aes(x = interaction(Fungicide, DPF), fill = Label_from)) +
+  geom_bar() + 
+  facet_wrap(~direction*Treatment)
+
+Dioszegia.positive.edges <- meta.edges %>%
+  subset(Genus_to %in% "Dioszegia" & Genus_from %in% c("Sphingomonas", "Methylobacterium") & direction == "Positive") %>%
+  group_by(Fungicide, DPF, direction, Treatment) %>%
+  select(to)
+
+Dioszegia.positive.edges.otus <- unique(Dioszegia.positive.edges$to)
+
+positive.bulleri.bacteriaphylum.edges.percent <- meta.edges %>%
+  subset(Family_to %in% "Bulleribasidiaceae" & Kingdom_from == "Bacteria" & direction == "Positive") %>%
+  group_by(Fungicide, DPF, Treatment, Phylum_from) %>%
+  tally() %>%
+  mutate(n_pct = 100*n/sum(n)) %>%
+  arrange(-n_pct)
+
+
+
+positive.bulleri.edges.percent
+
+ggplot(positive.bulleri.edges.percent, aes(x = interaction(Fungicide, DPF), y = n_pct)) +
+  geom_bar(aes(fill = Phylum_from), stat = "identity") +
+  theme_classic() + 
+  xlab("") + 
+  ylab("Percent of Edges") + 
+  #scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  #scale_x_discrete(labels = c("Soybean 24-dpf", "Soybean 13-dpf", "Corn 35-dpf", "Corn 9-dpf")) +
+  #ggtitle("Fungicide affected taxa") +
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  facet_wrap(~Treatment) +
+  #scale_y_continuous(breaks=seq(-80,30,by=10),labels=abs(seq(-80,30,by=10))) +
+theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="bottom",
+   legend.title = element_blank())
+
+
+#### Positive Bacterial Tremellomycete connections lost #### 
+# the graph is organized such that there are no Bulleribasidiaceae from to Alphaproteobacteria edges - remember tidygraph doesnt understand undirected graphs....
+meta.edges.over.time <- meta.edges %>%
+  filter(Kingdom_from %in% "Bacteria" & Family_to %in% "Bulleribasidiaceae") %>%
+  dplyr::group_by(Fungicide, DPF, Treatment, direction, Class_from) %>%
+  nest() %>%
+  mutate(n.edges = purrr::map(data, ~nrow(.x))) %>%
+  unnest(n.edges) %>%
+  pivot_wider(id_cols = c(Class_from,DPF,Treatment, direction), names_from = Fungicide, values_from = c(n.edges), values_fill = list(n.edges = 0)) %>%
+  mutate(diff.edges = Fungicide - Control) 
+
+
+  
+# these are nodes to be colored since they have more than 10 nodes in the metanetwork
+node.label.list <- c("Actinobacteria", "Alphaproteobacteria", "Betaproteobacteria", "Cytophagia", "unidentified prokaryotic class")
+
+meta.edges.over.time$Class2 <- ifelse(meta.edges.over.time$Class_from %!in% node.label.list, "Other", meta.edges.over.time$Class_from)
+
+
+ggplot(meta.edges.over.time, aes(x = DPF, y = diff.edges)) +
+  geom_bar(aes(fill = Class2), stat = "identity") +
+  theme_classic() + 
+  xlab("") + 
+  ylab("OTU count") + 
+  #scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  #scale_x_discrete(labels = c("Soybean 24-dpf", "Soybean 13-dpf", "Corn 35-dpf", "Corn 9-dpf")) +
+  #ggtitle("Fungicide affected taxa") +
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  coord_flip() + 
+  geom_hline(yintercept = 0, lty = 2) +
+  facet_wrap(~Treatment*direction) +
+  #scale_y_continuous(breaks=seq(-80,30,by=10),labels=abs(seq(-80,30,by=10))) +
+theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="bottom",
+   legend.title = element_blank())
+
+ggplot(meta.edges, aes(x = Class_from, y = weights)) +
+  geom_point(aes(fill = Class_to)) +
+  theme_classic() + 
+  xlab("") + 
+  ylab("OTU count") + 
+  #scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  #scale_x_discrete(labels = c("Soybean 24-dpf", "Soybean 13-dpf", "Corn 35-dpf", "Corn 9-dpf")) +
+  #ggtitle("Fungicide affected taxa") +
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  coord_flip() + 
+  geom_hline(yintercept = 0, lty = 2) +
+  facet_wrap(~Treatment*direction) +
+  #scale_y_continuous(breaks=seq(-80,30,by=10),labels=abs(seq(-80,30,by=10))) +
+theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="bottom",
+   legend.title = element_blank())
+
+##### Alphaproteobacteria edges lost ####
+meta.edges.over.time <- meta.edges %>%
+  filter(Family_to %in% "Bulleribasidiaceae" & Class_from == "Alphaproteobacteria" & direction == "Positive") %>%
+  group_by(Fungicide, DPF, Treatment, direction, Genus_from) %>%
+  nest() %>%
+  mutate(n.edges = purrr::map(data, ~nrow(.x))) %>%
+  unnest(n.edges) %>%
+  pivot_wider(id_cols = c(Genus_from,DPF,Treatment, direction), names_from = Fungicide, values_from = c(n.edges), values_fill = list(n.edges = 0)) %>%
+  mutate(diff.edges = Fungicide - Control)
+
+ggplot(meta.edges.over.time, aes(x = DPF, y = diff.edges)) +
+  geom_bar(aes(fill = Genus_from), stat = "identity") +
+  theme_classic() + 
+  xlab("") + 
+  ylab("OTU count") + 
+  #scale_fill_manual(values = c(cbbPalette[1], cbbPalette[2], cbbPalette[3], cbbPalette[4], cbbPalette[5], cbbPalette[8], "grey", cbbPalette[6], cbbPalette[7], "purple")) + 
+  #scale_x_discrete(labels = c("Soybean 24-dpf", "Soybean 13-dpf", "Corn 35-dpf", "Corn 9-dpf")) +
+  #ggtitle("Fungicide affected taxa") +
+  #theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  coord_flip() + 
+  geom_hline(yintercept = 0, lty = 2) +
+  facet_wrap(~Treatment) +
+  #scale_y_continuous(breaks=seq(-80,30,by=10),labels=abs(seq(-80,30,by=10))) +
+theme(
+   strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="bottom",
+   legend.title = element_blank())
+
+meta.edges %>%
+  filter(Class_to == "Tremellomycetes" & Kingdom_from == "Fungi" & direction == "Positive") %>%
+   ggplot(aes(x = interaction(Fungicide, DPF), fill = Genus_from)) +
+  geom_bar() + 
+  facet_wrap(~Treatment)
+```
+
+
+
+
+### Large network figure
+```{r}
+### INPUT ###
+network.object <- meta.net.corn$igraph.object
+network.complexity2 <- NULL
+edge.complexity <- NULL
+node.stats <- NULL
+
+network_dc_switch_no_weight <- delete_edge_attr(network.object, "weight")
+#### Node stats ####
+wtc <- cluster_walktrap(network_dc_switch_no_weight)
+mod <- modularity(network_dc_switch_no_weight, membership(wtc))
+connect <- pulsar::natural.connectivity(as_adj(network_dc_switch_no_weight), norm = TRUE)
+print(mod)
+hubs <- data.frame(hub_score(network_dc_switch_no_weight)$vector); colnames(hubs) <- c("hubscore")
+hubs$OTU <- V(network_dc_switch_no_weight)$name
+hubs$betweeness <- betweenness(network_dc_switch_no_weight, directed = FALSE, weights = NULL) 
+hubs$pr <- page_rank(network_dc_switch_no_weight)$vector 
+hubs$degree <- degree(network_dc_switch_no_weight)
+hubs$module <- wtc$membership
+
+nodes.stats <- hubs
+node.stats2 <- left_join(nodes.stats, mean.rel.abund.combined, by = "OTU")
+node.stats <- rbind.data.frame(node.stats, node.stats2)
+########
+
+###### Network Complexity ######
+n.nodes <- length(V(network_dc_switch_no_weight)) # N nodes 
+n.edges <- length(E(network_dc_switch_no_weight)) # N edges
+############
+
+###### Edge Stats #######
+edge.network <- data.frame(ends(network.object, E(network.object))) 
+colnames(edge.network) <- c("from", "to")
+
+edge.network <- left_join(edge.network, taxonomy.combined, by = c("from" = "OTU"))
+
+colnames(edge.network) <- c("from", "to", "Kingdom_from", "Phylum_from", "Class_from", "Order_from", 
+                            "Family_from", "Genus_from", "Label_from", "Species_from")
+
+edge.network <- left_join(edge.network, taxonomy.combined, by = c("to" = "OTU"))
+colnames(edge.network) <- c("from", "to", "Kingdom_from", "Phylum_from", "Class_from", "Order_from", 
+                            "Family_from", "Genus_from", "Label_from", "Species_from", 
+                            "Kingdom_to", "Phylum_to", "Class_to", "Order_to", 
+                            "Family_to", "Genus_v", "Label_to", "Species_to")
+edge.network$weights <- E(network.object)$weight
+edge.network$direction <- ifelse(edge.network$weights > 0, "Positive", "Negative")
+edge.network$inter <- ifelse(edge.network$Kingdom_from == edge.network$Kingdom_to, "Intrakingdom", "Interkingdom")
+edge.network$interXdirection <- interaction(edge.network$inter, edge.network$direction)
+edge.network$Kingdom_Kingdom <- ifelse(edge.network$inter == "Intrakingdom" & edge.network$Kingdom_to == "Fungi", "Fungal-Fungal", "Prokaryote-Prokaryote")
+
+edge.network$Tremellomycete_Alphaproteobacteria <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Alphaproteobacteria" & edge.network$direction == "Positive", "Tremellomycete-Alphaproteobacteria", "Other")
+edge.network$Tremellomycete_Actinobacteria <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Actinobacteria" & edge.network$direction == "Positive", "Tremellomycete-Actinobacteria", "Other")
+edge.network$Tremellomycete_Cytophagia <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Class_from == "Cytophagia" & edge.network$direction == "Positive", "Tremellomycete-Cytophagia", "Other")
+edge.network$Bull_Prok <- ifelse(edge.network$Genus_v %in% c("Hannaella", "Vishniacozyma", "Dioszegia") & edge.network$Genus_from %in% c("Sphingomonas", "Methylobacterium", "Hymenobacter", "Pseudomonas", "Nocardioides") & edge.network$direction == "Positive", "Bull-Prok", "Other")
+
+### Hannaella - Bacteria positive edges ###
+edge.network$Hannaella_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Hannaella_Sphingomonas", "Other")
+edge.network$Hannaella_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Hannaella_Methylobacterium", "Other")
+edge.network$Hannaella_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Hannaella_Hymenobacter", "Other")
+edge.network$Hannaella_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Hannaella_Pseudomonas", "Other")
+edge.network$Hannaella_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Hannaella") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Hannaella_Nocardioides", "Other")
+
+### Dioszengia - Bacteria positive edges ###
+edge.network$Dioszegia_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Dioszegia_Sphingomonas", "Other")
+edge.network$Dioszegia_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Dioszegia_Methylobacterium", "Other")
+edge.network$Dioszegia_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Dioszegia_Hymenobacter", "Other")
+edge.network$Dioszegia_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Dioszegia_Pseudomonas", "Other")
+edge.network$Dioszegia_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Dioszegia") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Dioszegia_Nocardioides", "Other")
+
+### Vishniacozyma - Bacteria positive edges ###
+edge.network$Vishniacozyma_Sphingomonas <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Sphingomonas") & edge.network$direction == "Positive", "Vishniacozyma_Sphingomonas", "Other")
+edge.network$Vishniacozyma_Methylobacterium <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Methylobacterium") & edge.network$direction == "Positive", "Vishniacozyma_Methylobacterium", "Other")
+edge.network$Vishniacozyma_Hymenobacter <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Hymenobacter") & edge.network$direction == "Positive", "Vishniacozyma_Hymenobacter", "Other")
+edge.network$Vishniacozyma_Pseudomonas <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Pseudomonas") & edge.network$direction == "Positive", "Vishniacozyma_Pseudomonas", "Other")
+edge.network$Vishniacozyma_Nocardioides <- ifelse(edge.network$Genus_v %in% c("Vishniacozyma") & edge.network$Genus_from %in% c("Nocardioides") & edge.network$direction == "Positive", "Vishniacozyma_Nocardioides", "Other")
+
+n.Tremellomycete_Alphaproteobacteria <- length(edge.network$Tremellomycete_Alphaproteobacteria[edge.network$Tremellomycete_Alphaproteobacteria != "Other"])
+n.Tremellomycete_Actinobacteria <- length(edge.network$Tremellomycete_Actinobacteria[edge.network$Tremellomycete_Actinobacteria != "Other"])
+n.Tremellomycete_Cytophagia <- length(edge.network$Tremellomycete_Cytophagia[edge.network$Tremellomycete_Cytophagia != "Other"])
+n.Bull_Prok <- length(edge.network$Bull_Prok[edge.network$Bull_Prok != "Other"])
+
+### n Hannaella - Bacteria positive edges ###
+n.Hannaella_Sphingomonas <- length(edge.network$Hannaella_Sphingomonas[edge.network$Hannaella_Sphingomonas != "Other"])
+n.Hannaella_Methylobacterium <- length(edge.network$Hannaella_Methylobacterium[edge.network$Hannaella_Methylobacterium != "Other"])
+n.Hannaella_Hymenobacter <- length(edge.network$Hannaella_Hymenobacter[edge.network$Hannaella_Hymenobacter != "Other"])
+n.Hannaella_Pseudomonas <- length(edge.network$Hannaella_Pseudomonas[edge.network$Hannaella_Pseudomonas != "Other"])
+n.Hannaella_Nocardioides <- length(edge.network$Hannaella_Nocardioides[edge.network$Hannaella_Nocardioides != "Other"])
+
+### n Dioszegia - Bacteria positive edges ###
+n.Dioszegia_Sphingomonas <- length(edge.network$Dioszegia_Sphingomonas[edge.network$Dioszegia_Sphingomonas != "Other"])
+n.Dioszegia_Methylobacterium <- length(edge.network$Dioszegia_Methylobacterium[edge.network$Dioszegia_Methylobacterium != "Other"])
+n.Dioszegia_Hymenobacter <- length(edge.network$Dioszegia_Hymenobacter[edge.network$Dioszegia_Hymenobacter != "Other"])
+n.Dioszegia_Pseudomonas <- length(edge.network$Dioszegia_Pseudomonas[edge.network$Dioszegia_Pseudomonas != "Other"])
+n.Dioszegia_Nocardioides <- length(edge.network$Dioszegia_Nocardioides[edge.network$Dioszegia_Nocardioides != "Other"])
+
+### n Vishniacozyma - Bacteria positive edges ###
+n.Vishniacozyma_Sphingomonas <- length(edge.network$Vishniacozyma_Sphingomonas[edge.network$Vishniacozyma_Sphingomonas != "Other"])
+n.Vishniacozyma_Methylobacterium <- length(edge.network$Vishniacozyma_Methylobacterium[edge.network$Vishniacozyma_Methylobacterium != "Other"])
+n.Vishniacozyma_Hymenobacter <- length(edge.network$Vishniacozyma_Hymenobacter[edge.network$Vishniacozyma_Hymenobacter != "Other"])
+n.Vishniacozyma_Pseudomonas <- length(edge.network$Vishniacozyma_Pseudomonas[edge.network$Vishniacozyma_Pseudomonas != "Other"])
+n.Vishniacozyma_Nocardioides <- length(edge.network$Vishniacozyma_Nocardioides[edge.network$Vishniacozyma_Nocardioides != "Other"])
+
+n.Intrakingdom.Neg <- length(edge.network$interXdirection[edge.network$interXdirection == "Intrakingdom.Negative"])
+n.Intrakingdom.Pos <- length(edge.network$interXdirection[edge.network$interXdirection == "Intrakingdom.Positive"])
+n.Interkingdom.Pos <- length(edge.network$interXdirection[edge.network$interXdirection == "Interkingdom.Positive"])
+n.Interkingdom.Neg <- length(edge.network$interXdirection[edge.network$interXdirection == "Interkingdom.Negative"])
+n.Fungal.Neg <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Fungal-Fungal" & edge.network$direction == "Negative"])
+n.Fungal.Pos <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Fungal-Fungal" & edge.network$direction == "Positive"])
+n.Prok.Neg <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Prokaryote-Prokaryote" & edge.network$direction == "Negative"])
+n.Prok.Pos <- length(edge.network$Kingdom_Kingdom[edge.network$Kingdom_Kingdom == "Prokaryote-Prokaryote" & edge.network$direction == "Positive"])
+
+
+edge.network_i <- merge(edge.network, samples)
+edge.complexity <- rbind.data.frame(edge.network_i, edge.complexity)
+######
+
+network_complexity <- data.frame(phyloseq.object@sam_data[phyloseq.object@sam_data$SampleID == Sample,]) 
+network_complexity_i <- cbind.data.frame(n.nodes, n.edges, network_complexity, 
+                                         n.Intrakingdom.Neg, n.Intrakingdom.Pos, n.Interkingdom.Pos, n.Interkingdom.Neg,
+                                         n.Fungal.Neg, n.Fungal.Pos, n.Prok.Neg, n.Prok.Pos, mod, connect, n.Tremellomycete_Alphaproteobacteria, n.Tremellomycete_Actinobacteria, n.Tremellomycete_Cytophagia, n.Bull_Prok, n.Hannaella_Sphingomonas, n.Hannaella_Methylobacterium, n.Hannaella_Hymenobacter, n.Hannaella_Pseudomonas, n.Hannaella_Nocardioides, 
+                                         n.Vishniacozyma_Sphingomonas, n.Vishniacozyma_Methylobacterium, n.Vishniacozyma_Hymenobacter, n.Vishniacozyma_Pseudomonas, n.Vishniacozyma_Nocardioides, 
+                                         n.Dioszegia_Sphingomonas, n.Dioszegia_Methylobacterium, n.Dioszegia_Hymenobacter, n.Dioszegia_Pseudomonas, n.Dioszegia_Nocardioides)
+network.complexity2 <- rbind.data.frame(network.complexity2, network_complexity_i)
+
+
+### OTUPUT ###
+Network.complexity <- network.complexity2 
+Network.edges <- edge.complexity
+Network.nodes <- node.stats
+##################################
+colnames(Network.nodes)[[2]] <- "name"
+
+meta.net.graph <- tbl_graph(nodes = Network.nodes, edges = Network.edges)
+
+meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  activate(edges) %>%
+  filter(Family_to %in% "Bulleribasidiaceae" & Phylum_from %in% c("Actinobacteria", "Bacteroidetes", "Cytophagia")) %>%
+  activate(nodes) %>%
+  filter(Family %in% "Bulleribasidiaceae" | Phylum %in% c("Actinobacteria", "Bacteroidetes", "Cytophagia")) %>%
+  ggraph(layout = "linear") +
+    geom_edge_arc2(aes(color = direction, alpha = abs(weights))) +
+    #scale_edge_colour_manual(values = c(cbbPalette[[1]], cbbPalette[[2]], cbbPalette[[3]], cbbPalette[[4]])) +
+    geom_node_point(aes(color = Kingdom), shape = 19, size = 2) +
+    #geom_node_text(aes(label = Label), size = 2, vjust = 0, hjust = 1.1, angle = 10) +
+    #scale_color_manual(values = testpallete) +
+    scale_size_continuous(range = c(1,5), name = "Mean % RA", breaks = c(0.01, 0.1, 1, 2, 5, 10)) +
+    scale_edge_width(range = c(0.5, 2)) + 
+  theme_graph() +
+  coord_flip()+
+  #guides(color = guide_legend(override.aes=list(shape=c(rep(19, 10)), size = 4))) +
+  theme(legend.position="none")
+
+meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+  mutate(community = as.factor(group_infomap())) %>% 
+  #activate(edges) %>%
+#filter(Family_to %in% "Bulleribasidiaceae") %>%
+  
+ggraph(layout = 'stress') + 
+    geom_edge_link(aes(alpha = ..index..), show.legend = FALSE) + 
+    geom_node_point(aes(colour = community, size = mean.relabund)) + 
+    theme_graph()
+
+meta.net.graph %>%
+  arrange(Kingdom, Phylum, Class, Order, Family, Genus, Species) %>%
+ggraph(graph, 'fabric', sort.by = node_rank_fabric()) + 
+  geom_node_range(colour = 'grey') + 
+  geom_edge_span(end_shape = 'square') + 
+  coord_fixed()
+
+layout <- create_layout(gr, layout = 'igraph', algorithm = 'kk')
+```
+
