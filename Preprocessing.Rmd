@@ -129,7 +129,7 @@ dim(silva_taxonomy_16s_clean)
 
 # Removing fungal and other non-target taxa ----------------------------------------------------------------------------
 head(silva_taxonomy_16s_clean)
-levels(silva_taxonomy_16s_clean$High_level_taxonomy)
+levels(as.factor(silva_taxonomy_16s_clean$High_level_taxonomy))
 
 silva_taxonomy_16s_clean %>% dplyr::filter(silva_taxonomy_16s_clean$High_level_taxonomy == "Alveolata")
 silva_taxonomy_16s_clean %>% dplyr::filter(silva_taxonomy_16s_clean$High_level_taxonomy == "Fungi")
@@ -142,7 +142,8 @@ silva_taxonomy_16s_clean_filt <- subset(silva_taxonomy_16s_clean,
                                         High_level_taxonomy != "Alveolata" & 
                                           High_level_taxonomy!= "Fungi" &
                                           High_level_taxonomy!= "Stramenopila" &
-                                          High_level_taxonomy!= "Viridiplantae")
+                                          High_level_taxonomy!= "Viridiplantae" & 
+                                          OTU_ID != "BOTU_614") # this is actually a fungi that was not caught by the Taxonomy asignment
 dim(silva_taxonomy_16s_clean_filt)
 
 TAX.bacteria.SILVA <- phyloseq::tax_table(as.matrix(silva_taxonomy_16s_clean_filt))
@@ -183,7 +184,7 @@ bacteria_sub_no_bad <- prune_taxa(goodTaxa, physeq_prok_nonfilt)
 ## Filter to Objective 2
 ```{r OBJ 2 FILTER}
 # Sanity check - we only want OTUs that are Bacteria or Archeae
-unique(bacteria_sub_no_bad@tax_table@.Data[,1])# We want to get rid of Any chloroplast, Unidentified at the Kingdom Level, all we want are bacteria and Archaea
+unique(bacteria_sub_no_bad@tax_table@.Data[,2])# We want to get rid of Any chloroplast, Unidentified at the Kingdom Level, all we want are bacteria and Archaea
 
 bacteria.no.plant.obj2 <- bacteria_sub_no_bad %>% 
   subset_samples(Objective == "Objective 2") %>%
@@ -210,7 +211,7 @@ bacteria.no.plant.obj2_1000reads <- prune_samples(sample_sums(bacteria.no.plant.
 ```{r SUM READ SAMPLES}
 sum(taxa_sums(bacteria.no.plant.obj2_1000reads))
 ```
-Final total for bacteria - 29,729,595 reads across 555 samples 
+Final total for bacteria - 29,691,681 reads across 555 samples 
 
 ```{r FUNGI X diff.}
 mean(sample_sums(bacteria.no.plant.obj2_1000reads)) # 53499.94.84
