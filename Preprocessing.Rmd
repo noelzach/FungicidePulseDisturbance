@@ -327,7 +327,7 @@ taxonomy_ITS06[1:100, ]
 # Importing taxonomies at 0.8 confidence -------------------------------------------------------------------------------
 taxonomy_ITS08 <-
   read.delim(
-    "../../Fungicide/Fungi/OTU/Taxonomy/consensus_taxonomy_euk_08.txt",
+    "../../Fungicide/Fungi/OTU/Taxonomy/constax_taxonomy_07.txt",
     header = TRUE,
     row.names = 1, 
     sep = "\t")
@@ -447,9 +447,9 @@ fungi_obj2 <- fungi_sub_no_bad %>%
 ### SAVE RDS FUNGI UNEDITED
 ```{r FUNGI UNEDITED}
 # Save an object to a file
-saveRDS(fungi_obj2, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_obj2_unedited_010621.rds")
+saveRDS(fungi_obj2, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_obj2_unedited_022221.rds")
 # Restore the object
-fungi.obj2.unedited <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_obj2_unedited_010621.rds")
+fungi.obj2.unedited <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_obj2_unedited_022221.rds")
 ```
 
 ### FILTER FUNGI TO 1000 reads per sample
@@ -462,19 +462,19 @@ fungi_obj2_1000reads <- prune_samples(sample_sums(fungi_obj2) > 1000, fungi_obj2
 ```{r SUM READ SAMPLES}
 sum(taxa_sums(fungi_obj2_1000reads))
 ```
-Final total for fungi - 19611620 reads across 554 samples with 5304 taxa
+Final total for fungi - 20844912 reads across 554 samples with 5315 taxa
 
 ```{r FUNGI X diff.}
-mean(sample_sums(fungi_obj2_1000reads)) # 35400.04
-median(sample_sums(fungi_obj2_1000reads)) # 29347.5 reads
+mean(sample_sums(fungi_obj2_1000reads)) # 37626.19
+median(sample_sums(fungi_obj2_1000reads)) # 30369.5 reads
 ```
  
 ## Load Non-Normalized Data
 ```{r FUNGI No Norm - RDS}
 # Save an object to a file
-saveRDS(fungi_obj2_1000reads, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_010621.rds")
+saveRDS(fungi_obj2_1000reads, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_022221.rds")
 # Restore the object
-fungi.no.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_010621.rds")
+fungi.no.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_022221.rds")
 ```
 
 ## Rarefaction analysis - with 1000 reads per sample object
@@ -535,9 +535,9 @@ fungi.css.norm <- ReformatTaxonomy(fungi.css.norm)
 Save the fungi phyloseq object as an RDS file to load faster in future.
 ```{r FUNGI CSS NORM - RDS}
 # Save an object to a file
-saveRDS(fungi.css.norm, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_010621.rds")
+saveRDS(fungi.css.norm, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_022221.rds")
 # Restore the object
-fungi.css.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_010621.rds")
+fungi.css.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_022221.rds")
 ```
 
 These RDS files that are generated in this script are the files used in the rest of the analysis for this manuscript. 
