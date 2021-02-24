@@ -324,60 +324,67 @@ taxonomy_ITS06 <-
 head(taxonomy_ITS06)
 taxonomy_ITS06[1:100, ]
 
-# Importing taxonomies at 0.8 confidence -------------------------------------------------------------------------------
-taxonomy_ITS08 <-
+# Importing taxonomies at 0.7 confidence -------------------------------------------------------------------------------
+taxonomy_ITS07 <-
   read.delim(
     "../../Fungicide/Fungi/OTU/Taxonomy/constax_taxonomy_07.txt",
     header = TRUE,
     row.names = 1, 
     sep = "\t")
 
-head(taxonomy_ITS08)
-taxonomy_ITS08[1:100, ]
+head(taxonomy_ITS07)
+taxonomy_ITS07[1:100, ]
 
 # check for identical ordering
-identical(rownames(taxonomy_ITS06), rownames(taxonomy_ITS08))
+identical(rownames(taxonomy_ITS06), rownames(taxonomy_ITS07))
 
-taxonomy_ITS08$Kingdom_06 <- taxonomy_ITS06$Kingdom
-head(taxonomy_ITS08)
-taxonomy_ITS08[1:100, ]
-dim(taxonomy_ITS08)
+taxonomy_ITS07$Kingdom_06 <- taxonomy_ITS06$Kingdom
+head(taxonomy_ITS07)
+taxonomy_ITS07[1:100, ]
+dim(taxonomy_ITS07)
 
-levels(taxonomy_ITS08$Kingdom)
+levels(taxonomy_ITS07$Kingdom)
 
 # how many unclassified OTUs in the two taxonomies?
 nrow(taxonomy_ITS06[taxonomy_ITS06$Kingdom!="Fungi",])
-nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom!="Fungi",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom!="Fungi",])
 
 # Non-target taxa
-nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Ichthyosporia",])
-nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Metazoa",])
-nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Protista",])
-nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Rhizaria",])
-nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Stramenopila",])
-nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="Viridiplantae",])
-nrow(taxonomy_ITS08[taxonomy_ITS08$Kingdom=="",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom=="Ichthyosporia",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom=="Metazoa",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom=="Protista",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom=="Rhizaria",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom=="Stramenopila",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom=="Viridiplantae",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom=="MockK",])
+nrow(taxonomy_ITS07[taxonomy_ITS07$Kingdom=="",])
 
-nrow(taxonomy_ITS08[taxonomy_ITS06$Kingdom=="Fungi",])
+nrow(taxonomy_ITS07[taxonomy_ITS06$Kingdom=="Fungi",])
 
 # removing non-fungal OTUs
-subset(taxonomy_ITS08, taxonomy_ITS08$Kingdom_06 == "Fungi") -> taxonomy_ITS08_filt
-dim(taxonomy_ITS08_filt)
-str(taxonomy_ITS08_filt)
+# This will remove the mock OTUs as well. 
+subset(taxonomy_ITS07, taxonomy_ITS07$Kingdom_06 == "Fungi" & taxonomy_ITS07$Kingdom != "MockK") -> taxonomy_ITS07_filt
+nrow(taxonomy_ITS07_filt[taxonomy_ITS07_filt$Kingdom=="MockK",]) #making sure the mocks are not in there. 
+dim(taxonomy_ITS07_filt)
+str(taxonomy_ITS07_filt)
 
 # checking filtering results
-nrow(taxonomy_ITS08_filt[taxonomy_ITS08_filt$Kingdom != "Fungi", ])
-nrow(taxonomy_ITS08_filt[taxonomy_ITS08_filt$Kingdom_06 != "Fungi", ])
+nrow(taxonomy_ITS07_filt[taxonomy_ITS07_filt$Kingdom != "Fungi", ]) #OTUs that at 0.7 confidence were not IDd to the Kingdom level, but we are using the 0.6 confidence to assign
+nrow(taxonomy_ITS07_filt[taxonomy_ITS07_filt$Kingdom_06 != "Fungi", ])
 
 # classify all OTUs at 60% identity to Fungi
-taxonomy_ITS08_filt$Kingdom <- taxonomy_ITS08_filt$Kingdom_06
+taxonomy_ITS07_filt$Kingdom <- taxonomy_ITS07_filt$Kingdom_06
 
+# re-checking filtering results - looks like all classified as fungi, good. move on. 
+nrow(taxonomy_ITS07_filt[taxonomy_ITS07_filt$Kingdom != "Fungi", ])
+nrow(taxonomy_ITS07_filt[taxonomy_ITS07_filt$Kingdom_06 != "Fungi", ])
+taxonomy_ITS07_filt[taxonomy_ITS07_filt$Kingdom == "MockK", ]
 # formatting ranks
-dim(taxonomy_ITS08_filt)
-taxonomy_ITS08_filt <- taxonomy_ITS08_filt[, 1:9]
-taxonomy_ITS08_filt$OTU_ID <- rownames(taxonomy_ITS08_filt)
+dim(taxonomy_ITS07_filt)
+taxonomy_ITS07_filt <- taxonomy_ITS07_filt[, 1:9]
+taxonomy_ITS07_filt$OTU_ID <- rownames(taxonomy_ITS07_filt)
 
-taxonomy_ITS08_filt <- taxonomy_ITS08_filt[, c(
+taxonomy_ITS07_filt <- taxonomy_ITS07_filt[, c(
   "Kingdom",
   "Phylum",
   "Class",
@@ -391,17 +398,17 @@ taxonomy_ITS08_filt <- taxonomy_ITS08_filt[, c(
 )]
 
 # Reduce isolate name length
-taxonomy_ITS08_filt$Isolate <- gsub("\\|.*","",taxonomy_ITS08_filt$Isolate)
-head(taxonomy_ITS08_filt)
+taxonomy_ITS07_filt$Isolate <- gsub("\\|.*","",taxonomy_ITS07_filt$Isolate)
+head(taxonomy_ITS07_filt)
 
 # Removing Lab contaminants in the ITS data ----------------------------------------------------------------------------
-str(taxonomy_ITS08_filt)
-taxonomy_ITS08_filt[taxonomy_ITS08_filt$Order=="Mortierellales",]
-subset(taxonomy_ITS08_filt, taxonomy_ITS08_filt$Isolate_percent_id<=99) -> taxonomy_ITS08_clean
-dim(taxonomy_ITS08_clean)
-taxonomy_ITS08_clean[taxonomy_ITS08_clean$Family=="Mortierellaceae",]
+str(taxonomy_ITS07_filt)
+taxonomy_ITS07_filt[taxonomy_ITS07_filt$Order=="Mortierellales",]
+subset(taxonomy_ITS07_filt, taxonomy_ITS07_filt$Isolate_percent_id<=99) -> taxonomy_ITS07_clean
+dim(taxonomy_ITS07_clean)
+taxonomy_ITS07_clean[taxonomy_ITS07_clean$Family=="Mortierellaceae",]
 
-TAX.fungi <- phyloseq::tax_table(as.matrix(taxonomy_ITS08_clean))
+TAX.fungi <- phyloseq::tax_table(as.matrix(taxonomy_ITS07_clean))
 ```
 
 ```{r FUNGI - FASTA}
@@ -411,6 +418,7 @@ Phyloseq object
 ```{r FUNGI - Phyloseq Object}
 fungi.unedited <- phyloseq::phyloseq(OTU.fungi, TAX.fungi, FASTA.fungi, SAMP.fungi)
 fungi.unedited <- ReformatTaxonomy(fungi.unedited)
+tax_table(fungi.unedited)
 ```
 
 ## DECONTAMINATE
@@ -442,14 +450,16 @@ unique(fungi_sub_no_bad@tax_table@.Data[,2])# We want to get rid of Mockmycota
 fungi_obj2 <- fungi_sub_no_bad %>% 
   subset_samples(Objective == "Objective 2") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) # remove taxa with zero reads (i.e., those not present in objective 2)
+
+tax_table(fungi_obj2)
 ```
 
 ### SAVE RDS FUNGI UNEDITED
 ```{r FUNGI UNEDITED}
 # Save an object to a file
-saveRDS(fungi_obj2, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_obj2_unedited_022221.rds")
+saveRDS(fungi_obj2, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_obj2_unedited_022421.rds")
 # Restore the object
-fungi.obj2.unedited <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_obj2_unedited_022221.rds")
+fungi.obj2.unedited <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_obj2_unedited_022421.rds")
 ```
 
 ### FILTER FUNGI TO 1000 reads per sample
@@ -467,14 +477,16 @@ Final total for fungi - 20844912 reads across 554 samples with 5315 taxa
 ```{r FUNGI X diff.}
 mean(sample_sums(fungi_obj2_1000reads)) # 37626.19
 median(sample_sums(fungi_obj2_1000reads)) # 30369.5 reads
+
+tax_table(fungi_obj2_1000reads)
 ```
  
 ## Load Non-Normalized Data
 ```{r FUNGI No Norm - RDS}
 # Save an object to a file
-saveRDS(fungi_obj2_1000reads, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_022221.rds")
+saveRDS(fungi_obj2_1000reads, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_022421.rds")
 # Restore the object
-fungi.no.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_022221.rds")
+fungi.no.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_022421.rds")
 ```
 
 ## Rarefaction analysis - with 1000 reads per sample object
@@ -529,15 +541,17 @@ New phyloseq object
 ```{r NORM PHYLOSEQ}
 fungi.css.norm <- phyloseq::phyloseq(norm.fungi.OTU, TAX.fungi, FASTA.fungi, SAMP.fungi)
 fungi.css.norm <- ReformatTaxonomy(fungi.css.norm)
+
+tax_table(fungi.css.norm)
 ```
 
 ## FUNGI CSS NORM RDS
 Save the fungi phyloseq object as an RDS file to load faster in future.
 ```{r FUNGI CSS NORM - RDS}
 # Save an object to a file
-saveRDS(fungi.css.norm, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_022221.rds")
+saveRDS(fungi.css.norm, file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_022421.rds")
 # Restore the object
-fungi.css.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_022221.rds")
+fungi.css.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_022421.rds")
 ```
 
 These RDS files that are generated in this script are the files used in the rest of the analysis for this manuscript. 

@@ -884,20 +884,21 @@ blank2na = function(x, na.strings=c('','.','NA','na','N/A','n/a','NaN','nan')) {
 ReformatTaxonomy <- function(dataframe){
   taxa_table <- as.data.frame(as.matrix(tax_table(dataframe)))
   # remember to do run this function only once on your dataframe
-  taxa_table$Genus <- as.character(taxa_table$Genus)
+  taxa_table$Species <- as.character(taxa_table$Species)
   taxa_table[taxa_table=="Unclassified"]<- NA
   taxa_table[taxa_table=="Unidentified"]<- NA
   taxa_table[taxa_table==""]<- NA
-  taxa_table[which(is.na(taxa_table$Genus) == FALSE), ]$Species <- paste(
-    taxa_table$Genus[is.na(taxa_table$Genus)==FALSE], "sp.", sep = " ")
+  #taxa_table[which(is.na(taxa_table$Species) == FALSE), ]$Species <- paste(
+   # taxa_table$Species[is.na(taxa_table$Species)==FALSE], "sp.", sep = " ")
   taxa_table <- taxa_table[c(8,1,2,3,4,5,6,7,9,10)]
   taxa_table[] = lapply(taxa_table, blank2na, na.strings=c('','NA','na','N/A','n/a','NaN','nan'))
   lastValue <- function(x) tail(x[!is.na(x)], 1)
   last_taxons<- apply(taxa_table[,1:8], 1, lastValue)
   taxa_table$BestMatch <- last_taxons
   taxa_table[, "BestMatch"] <- gsub("_", " ", taxa_table[, "BestMatch"])
+  taxa_table$BestMatch <- ifelse(is.na(taxa_table$Species == TRUE), paste(taxa_table$BestMatch, "sp.", sep = " "), taxa_table$Species)
   taxa_table$Taxonomy <- paste(taxa_table$OTU_ID, taxa_table$BestMatch, sep="-")
-  taxa_table[, "Genus"] <- gsub(" sp.", "", taxa_table[, "Genus"])
+  #taxa_table[, "Species"] <- gsub(" sp.", "", taxa_table[, "Species"])
   tax_table(dataframe) <- tax_table(as.matrix(taxa_table))
   return(dataframe)
 }
