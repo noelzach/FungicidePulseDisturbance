@@ -228,9 +228,9 @@ adonis2(bacteria.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(bacteri
 
 ```{r}
 # Restore the object
-fungi.no.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_010621.rds")
+fungi.no.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_022421.rds")
 # Restore the object
-fungi.css.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_010621.rds")
+fungi.css.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000seqMin_CSSNorm_022421.rds")
 ```
 
 ```{r}
@@ -286,7 +286,7 @@ So it seems that fungicide affected the number of corn leaf fungal taxa, and als
 
 We are going to check certain fungal lineages, like the Bulleribacideaceae because those were impacted by the fungicide. We know this from future analyses. 
 ```{r}
-physeq_fungi_nonorm_Bul = subset_taxa(fungi.no.norm, Family=="Bulleribasidiaceae") %>% phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
+physeq_fungi_nonorm_Bul = subset_taxa(fungi.no.norm) %>% phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE)
 
 # FUNGI 
 physeq_fungi_nonorm_Bul@sam_data$shannon <- estimate_richness(physeq_fungi_nonorm_Bul, measures=c("Shannon"))$Shannon
