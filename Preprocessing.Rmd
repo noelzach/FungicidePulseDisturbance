@@ -224,39 +224,45 @@ median(sample_sums(bacteria.no.plant.obj2_1000reads)) # 47590
 saveRDS(bacteria.no.plant.obj2_1000reads, file = "Preprocessing/Fungicide_Bacteria_RootsAndLeaves_newtaxa_nonorm_010621.rds")
 # Restore the object
 bacteria.no.norm <- readRDS(file = "Preprocessing/Fungicide_Bacteria_RootsAndLeaves_newtaxa_nonorm_010621.rds")
+
+bacteria.no.norm %>%
+  subset_samples(Crop == "Corn" & Compartment == "Root")
 ```
 
-### Rarecurves
+## Rarefaction analysis
+
 ```{r}
 sam.data <- data.frame(bacteria.no.norm@sam_data)
-bOTU.table <- bacteria.no.norm@otu_table
-S <- specnumber(t(bOTU.table)) # observed number of species
-raremax <- min(rowSums(t(bOTU.table)))
-Srare <- rarefy(t(bOTU.table), raremax)
+pOTU.table <- bacteria.no.norm@otu_table
+S <- specnumber(t(pOTU.table)) # observed number of species
+raremax <- min(rowSums(t(pOTU.table)))
+Srare <- rarefy(t(pOTU.table), raremax)
 plot(S, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species")
 abline(0, 1)
-rare.bac <- rarecurve(t(bOTU.table), step = 500, sample = raremax, col = "blue", cex = 0.6)
+rare.fun <- rarecurve(t(pOTU.table), step = 1000, sample = raremax, col = "blue", cex = 0.6)
 
-oom.rare.curve.extract <- NULL
-for(i in 1:length(rare.bac)){
-sample.200 <- data.frame(rare.spec = rare.bac[[i]])
-sample.200$read_depth <- attr(rare.bac[[i]], "Subsample")
-sample.200$SampleID <- rownames(t(bOTU.table[,i]))
-oom.rare.curve.extract <- rbind.data.frame(oom.rare.curve.extract, sample.200)
+prok.rare.curve.extract <- NULL
+for(i in 1:length(rare.fun)){
+sample.200 <- data.frame(rare.spec = rare.fun[[i]])
+sample.200$read_depth <- attr(rare.fun[[i]], "Subsample")
+sample.200$SampleID <- rownames(t(pOTU.table[,i]))
+prok.rare.curve.extract <- rbind.data.frame(prok.rare.curve.extract, sample.200)
 }
-oom.rare.curve.extract2 <- left_join(sam.data, oom.rare.curve.extract, by = "SampleID")
+prok.rare.curve.extract2 <- left_join(sam.data, prok.rare.curve.extract, by = "SampleID")
 
-ggplot(oom.rare.curve.extract2, aes(x = read_depth, y = rare.spec, group = SampleID, color = GrowthStage)) + 
+bacteria.rare <- ggplot(prok.rare.curve.extract2, aes(x = read_depth, y = rare.spec, group = SampleID)) + 
   #geom_point() +
-  geom_line() + 
+  geom_line(color = "grey") + 
   xlab("Reads") + 
   ylab("Number of OTUs") + 
   theme_classic() + 
-  geom_vline(xintercept = raremax, linetype = "dashed") +
-  facet_wrap(~Crop*Compartment, scales = "free") +
-  theme(legend.position="none")
+  geom_vline(xintercept = 47590, linetype = "dashed") +
+  facet_wrap(~interaction(Crop,Compartment), scales = "free") +
+  ggtitle("Prokaryotes") +
+  scale_x_continuous(labels = comma)
 
 ```
+
 
 
 ```{r FUNGI CSS norm.}
@@ -489,11 +495,11 @@ saveRDS(fungi_obj2_1000reads, file = "Preprocessing/Fungicide_Fungi_RootsAndLeav
 fungi.no.norm <- readRDS(file = "Preprocessing/Fungicide_Fungi_RootsAndLeaves_1000readsmin_nonorm_022421.rds")
 ```
 
-## Rarefaction analysis - with 1000 reads per sample object
+## Rarefaction analysis
 
 ```{r}
-sam.data <- data.frame(fungi.no.norm.filt@sam_data)
-fOTU.table <- fungi.no.norm.filt@otu_table
+sam.data <- data.frame(fungi.no.norm@sam_data)
+fOTU.table <- fungi.no.norm@otu_table
 S <- specnumber(t(fOTU.table)) # observed number of species
 raremax <- min(rowSums(t(fOTU.table)))
 Srare <- rarefy(t(fOTU.table), raremax)
@@ -501,25 +507,32 @@ plot(S, Srare, xlab = "Observed No. of Species", ylab = "Rarefied No. of Species
 abline(0, 1)
 rare.fun <- rarecurve(t(fOTU.table), step = 1000, sample = raremax, col = "blue", cex = 0.6)
 
-oom.rare.curve.extract <- NULL
+fungi.rare.curve.extract <- NULL
 for(i in 1:length(rare.fun)){
 sample.200 <- data.frame(rare.spec = rare.fun[[i]])
 sample.200$read_depth <- attr(rare.fun[[i]], "Subsample")
 sample.200$SampleID <- rownames(t(fOTU.table[,i]))
-oom.rare.curve.extract <- rbind.data.frame(oom.rare.curve.extract, sample.200)
+fungi.rare.curve.extract <- rbind.data.frame(fungi.rare.curve.extract, sample.200)
 }
-oom.rare.curve.extract2 <- left_join(sam.data, oom.rare.curve.extract, by = "SampleID")
+fungi.rare.curve.extract2 <- left_join(sam.data, fungi.rare.curve.extract, by = "SampleID")
 
-ggplot(oom.rare.curve.extract2, aes(x = read_depth, y = rare.spec, group = SampleID, color = GrowthStage)) + 
+fungi.rare <- ggplot(fungi.rare.curve.extract2, aes(x = read_depth, y = rare.spec, group = SampleID)) + 
   #geom_point() +
-  geom_line() + 
+  geom_line(color = "grey") + 
   xlab("Reads") + 
   ylab("Number of OTUs") + 
   theme_classic() + 
-  geom_vline(xintercept = raremax, linetype = "dashed") +
-  facet_wrap(~Crop*Compartment, scales = "free") 
+  geom_vline(xintercept = 30369.5, linetype = "dashed") +
+  facet_wrap(~interaction(Crop,Compartment), scales = "free") +
+  ggtitle("Fungi") +
+  scale_x_continuous(labels = comma)
 
 ```
+
+```{r}
+ggpubr::ggarrange(fungi.rare, bacteria.rare, nrow = 1, labels = c("A", "B"))
+```
+
 
 
 ## RDS - FUNGI CSS Normalization

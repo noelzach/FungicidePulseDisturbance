@@ -591,8 +591,8 @@ plot1 <- plot_ordination(fungi.norm.leaf.soy.0dpf,cap_fungicide_soy_leaf_0dpf,co
 
 cap_fungicide_soy_leaf_soy_0dpf <- ggplot(plot1$data, aes(x = CAP1, y = MDS1, fill = Fungicide, shape = Treatment)) +
   geom_point(size=4, alpha = 0.7)+
-  scale_shape_manual(values=c(21,22))+
-  scale_fill_manual(values=cbbPalette)+
+  scale_shape_manual(values=c(21,22), label = c("Conv.", "No-till"), name = "")+
+  scale_fill_manual(values=cbbPalette, label = c("Control", "Fungicide"), name = "")+
   xlab("CAP1 (1.8%)") + 
   ylab("MDS1 (38.9%)") +
   theme(legend.position="bottom",legend.title=element_blank(),legend.key = element_blank())+
@@ -663,7 +663,7 @@ cap_fungicide_soy_leaf_soy_24dpf <- ggplot(plot1$data, aes(x = CAP1, y = MDS1, f
   geom_point(size=4, alpha = 0.7)+
   scale_shape_manual(values=c(21,22))+
   scale_fill_manual(values=cbbPalette)+
-  xlab("CAP1 (10.3%)") + 
+  xlab("CAP1 (10.6%)") + 
   ylab("MDS1 (18.3%)") +
   theme(legend.position="bottom",legend.title=element_blank(),legend.key = element_blank())+
   guides(fill=guide_legend(override.aes=list(shape=21))) +
@@ -787,7 +787,7 @@ cap_fungicide_soy_leaf_corn_34dpf <- ggplot(plot1$data, aes(x = CAP1, y = MDS1, 
 ######## PLOT FIGURE 1 #######
 ggpubr::ggarrange(cap_fungicide_soy_leaf_soy_0dpf, cap_fungicide_soy_leaf_soy_13dpf, cap_fungicide_soy_leaf_soy_24dpf,
                   cap_fungicide_soy_leaf_corn_0dpf, cap_fungicide_soy_leaf_corn_9dpf, cap_fungicide_soy_leaf_corn_34dpf,
-                  common.legend = TRUE, nrow = 2, ncol = 3)
+                  common.legend = TRUE, nrow = 2, ncol = 3, labels = c("A", "B", "C", "D", "E", "F"))
 ```
 
 Next we will use a differential abundance analysis to determine the fungal taxa that were altered by the fungicide. 

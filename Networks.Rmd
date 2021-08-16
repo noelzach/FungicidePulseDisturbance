@@ -219,10 +219,6 @@ meta.net.soy$igraph.object
 
 meta.net.corn <- readRDS("NetworkRDS/Output/corn_leaf_network_022421.rds")
 meta.net.corn$igraph.object
-
-# filtering edges based on weight
-#corn.graph2 <- delete.edges(meta.net.corn$igraph.object, which(E(meta.net.corn$igraph.object)$weight <= 0.05 & E(meta.net.corn$igraph.object)$weight >= -0.05))
-soy.graph2 <- delete.edges(meta.net.soy$igraph.object, which(E(meta.net.soy$igraph.object)$weight <= 0.05 & E(meta.net.soy$igraph.object)$weight >= -0.05))
 ```
 
 ## Loading in Metadata associated with each OTU such as, taxonomy, differential abundance, core membership, relative abundance etc. 
@@ -289,41 +285,6 @@ mean.rel.abund.prok <- prok_obj2.ra %>%
 #### Join the abundances together ####
 mean.rel.abund.combined <- rbind.data.frame(mean.rel.abund.prok, mean.rel.abund.fungi)
 ```
-
-```{r}
-network.scale.free.soy <- data.frame(degree(meta.net.soy$igraph.object)); colnames(network.scale.free.soy) <- "degree"
-network.scale.free.soy$OTU <- row.names(network.scale.free.soy)
-network.scale.free.soy <- left_join(mean.rel.abund.combined, network.scale.free.soy, by = "OTU")
-
-ggplot(network.scale.free.soy, aes(x = degree, y = mean.relabund)) + 
-  geom_point()
-
-deg.dist <- as.data.frame(table(degree(meta.net.soy$igraph.object)))
-
-deg.dist$Var1 <- as.numeric(deg.dist$Var1)
-
-  ggplot(deg.dist, aes(x = log(Var1), y = log(Freq))) +
-  geom_point() 
-
-network.scale.free.corn <- data.frame(degree(corn.graph2)); colnames(network.scale.free.corn) <- "degree"
-network.scale.free.corn$OTU <- row.names(network.scale.free.corn)
-network.scale.free.corn <- left_join(mean.rel.abund.combined, network.scale.free.corn, by = "OTU")
-
-ggplot(network.scale.free.corn, aes(x = degree, y = mean.relabund)) + 
-  geom_point()
-
-deg.dist <- as.data.frame(table(degree(corn.graph2)))
-
-deg.dist$Var1 <- as.numeric(deg.dist$Var1)
-
-  ggplot(deg.dist, aes(x = Var1, y = Freq)) +
-  geom_point() +
-    scale_y_continuous("Frequency",
-                     trans = "log10") +
-    scale_x_continuous("k",
-                     trans = "log10") 
-```
-
 
 ### Network Complexity 
 
@@ -589,21 +550,70 @@ Network.edges$DPF <- factor(Network.edges$DPF, levels = c("0-dpf", "9-dpf", "13-
 
 Lets plot these results
 ```{r}
-#### NUMBER OF EDGES PER NODE (i.e., Network Complexity) ####
-complexity.box <- ggplot(Network.complexity[Network.complexity$Crop == "Soy",], aes(x = DPF, y = complexity, color = Fungicide)) + 
+#### NUMBER OF EDGES PER NODE (i.e., Network Complexity) Soybean ####
+complexity.box <- ggplot(Network.complexity[Network.complexity$Crop == "Soy",], aes(x = DPF, y = complexity, fill = Fungicide)) + 
   geom_boxplot(outlier.shape = NA) + 
-  geom_point(position = position_jitterdodge()) +
+  geom_point(position = position_jitterdodge(), shape = 21) +
   ylab("Linkage density") + 
   xlab("")+
-  stat_compare_means(method = "wilcox", aes(label = ..p.format..), hide.ns = T, label.y = 0.38, size = 6) +  
-  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = T, label.y = 7.5, size = 6) +  
+  scale_fill_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide"), name = "") +
   theme_classic() +
   labs(color = "") + 
-  ylim(c(0, 8.5)) +
+  ylim(c(2, 8.5)) +
   facet_wrap(~Crop*Treatment_label, scales = "free") +
   theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
    strip.text.x = element_text(size = 12, color = "black"),
    legend.position="top")
+
+#### NUMBER OF NODEs Soybean####
+nodes.box <- ggplot(Network.complexity[Network.complexity$Crop == "Soy",], aes(x = DPF, y = n.nodes, fill = Fungicide)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_point(position = position_jitterdodge(), shape =21) +
+  ylab("Nodes") + 
+  xlab("")+
+  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = T, label.y = 550, size = 6) +  
+  scale_fill_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  theme_classic() +
+  labs(color = "") + 
+  ylim(c(100, 600)) +
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### NUMBER OF EDGES PER NODE (i.e., Network Complexity) Corn ####
+complexity.box.corn <- ggplot(Network.complexity[Network.complexity$Crop == "Corn",], aes(x = DPF, y = complexity, color = Fungicide)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_point(position = position_jitterdodge()) +
+  ylab("Linkage density") + 
+  xlab("")+
+  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = T, label.y = 1, size = 6) +  
+  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+#### NUMBER OF NODEs Corn####
+nodes.box.corn <- ggplot(Network.complexity[Network.complexity$Crop == "Corn",], aes(x = DPF, y = n.nodes, color = Fungicide)) + 
+  geom_boxplot(outlier.shape = NA) + 
+  geom_point(position = position_jitterdodge()) +
+  ylab("Nodes") + 
+  xlab("")+
+  stat_compare_means(method = "wilcox", aes(label = ..p.adj..), hide.ns = T, label.y = 100, size = 6) +  
+  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  theme_classic() +
+  labs(color = "") + 
+  facet_wrap(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   legend.position="top")
+
+
+ggpubr::ggarrange(complexity.box, nodes.box, nrow = 1, labels = c("(a)", "(b)"), common.legend = T)
 ```
 
 ```{r}
@@ -649,6 +659,32 @@ Network.edges %>%
   complete(Genus_from2, fill = list(n = 0)) %>%
   mutate(freq = n / sum(n)) %>%
   arrange(-freq)
+
+Network.edges %>%
+  subset(Family_to %in% c("Bulleribasidiaceae") & Crop == "Soy" & DPF == "13-dpf") %>%
+  subset(Kingdom_from == "Bacteria") %>%
+  #subset(weights > 0.01 | weights < -0.01) %>%
+  dplyr::mutate(Genus_from2 = replace_na(Genus_from, "unidentified")) %>%
+  dplyr::group_by(Genus_from2, Fungicide, direction) %>%
+  dplyr::tally() %>%
+  ungroup() %>%
+  complete(Genus_from2, fill = list(n = 0)) %>%
+  mutate(freq = n / sum(n)) %>%
+  arrange(-freq) %>%
+  pivot_wider(id_cols = c(Genus_from2, Fungicide), names_from = c(direction), values_from = c(n)) %>%
+  mutate_if(is.numeric , replace_na, replace = 0) %>%
+  mutate(diff = Positive - Negative) %>%
+  #mutate(Genus_label = ifelse(abs(diff) < 10, "Other", Genus_from2)) %>%
+  #mutate(freq2 = ifelse(direction == "Negative", freq*-1, freq)) %>%
+  ggplot(aes(x = reorder(Genus_from2, diff), y = diff, fill = Fungicide)) + 
+  geom_col() +
+  coord_flip() + 
+  xlab("") + 
+  ylab("Edge Composition") + 
+  scale_y_continuous(labels = scales::percent) + 
+  scale_fill_manual(values=cbbPalette) + 
+  theme_classic() +
+  geom_hline(yintercept = 0, linetype = "dashed", size = 1)
 ```
 
 ```{r}
@@ -669,12 +705,54 @@ positive.edges.prok <- Network.edges %>%
   complete(SampleID, nesting(Class_from), fill = list(N = 0)) %>%
   left_join(Network.complexity, by = "SampleID") 
 
-means.prok <- ggpubr::compare_means(N ~ Fungicide, data = positive.edges.prok, group.by = c("Class_from", "Crop", "Treatment_label", "DPF"), p.adjust.method = "fdr")
+means.prok.pos <- ggpubr::compare_means(N ~ Fungicide, data = positive.edges.prok, group.by = c("Class_from", "Crop", "Treatment_label", "DPF"), p.adjust.method = "fdr")
+
+negative.edges.prok <- Network.edges %>%
+  subset(Family_to %in% c("Bulleribasidiaceae") & Class_from %in% c("Alphaproteobacteria", "Actinobacteria", "Gammaproteobacteria", "Bacteroidia") & direction == "Negative") %>%
+  dplyr::group_by(SampleID, Class_from) %>%
+  dplyr::summarize(N = n()) %>%
+  dplyr::ungroup() %>%
+  complete(SampleID, nesting(Class_from), fill = list(N = 0)) %>%
+  left_join(Network.complexity, by = "SampleID") 
+
+means.prok.neg <- ggpubr::compare_means(N ~ Fungicide, data = negative.edges.prok, group.by = c("Class_from", "Crop", "Treatment_label", "DPF"), p.adjust.method = "fdr")
 ```
 
 ```{r}
 bull.class <- Network.edges %>%
   subset(Family_to %in% c("Bulleribasidiaceae") & Class_from %in% c("Alphaproteobacteria", "Actinobacteria", "Gammaproteobacteria", "Bacteroidia") & direction == "Positive" & Crop == "Soy") %>%
+  dplyr::group_by(SampleID, Class_from) %>%
+  dplyr::summarize(N = n()) %>%
+  dplyr::ungroup() %>%
+  complete(SampleID, nesting(Class_from), fill = list(N = 0)) %>%
+  left_join(Network.complexity, by = "SampleID") %>%
+  dplyr::group_by(Class_from, DPF, Treatment_label, Crop, Fungicide) %>%
+  nest() %>% # nest this
+  mutate(mean.edges = purrr::map(data, ~mean(.x$N))) %>% # loop over each combination and count how many samples
+  unnest(c(mean.edges)) %>%
+  pivot_wider(id_cols = c(Class_from, Treatment_label, DPF, Crop), names_from = c(Fungicide), values_from = c(mean.edges)) %>%
+  mutate(diff.mean.edges = F-C) %>%
+  left_join(means.prok.pos, by = c("Class_from", "Crop", "Treatment_label", "DPF")) %>%
+  mutate(Sig = ifelse(p.adj <= 0.05, "Significant", "Not Significant")) %>%
+  ggplot(aes(x = DPF, y = Class_from, color = diff.mean.edges,  size = Sig, shape = Sig)) + 
+  geom_point() +
+  ylab("") + 
+  xlab("")+
+  scale_color_gradient2(low = cbbPalette[[2]], mid = cbbPalette[[1]], high = cbbPalette[[1]], name = "Mean \nDifference") +
+  scale_shape_manual(values = c(18,19), name = "") +
+  scale_size_manual(values = c(4, 8), name = "") + 
+  theme_classic() +
+  labs(color = "") + 
+  facet_grid(~Crop*Treatment_label, scales = "free") +
+  theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
+   strip.text.x = element_text(size = 12, color = "black"),
+   axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
+   legend.position="right") +
+  ggtitle("Positive edges \nwith Bulleribasidiaceae")
+bull.class 
+
+bull.class.neg <- Network.edges %>%
+  subset(Family_to %in% c("Bulleribasidiaceae") & Class_from %in% c("Alphaproteobacteria", "Actinobacteria", "Gammaproteobacteria", "Bacteroidia") & direction == "Negative" & Crop == "Soy") %>%
   dplyr::group_by(SampleID, Class_from) %>%
   dplyr::summarize(N = n()) %>%
   dplyr::ungroup() %>%
@@ -703,7 +781,6 @@ bull.class <- Network.edges %>%
    axis.text.x = element_text(angle = 45, vjust = 1, hjust=1),
    legend.position="right") +
   ggtitle("Positive edges \nwith Bulleribasidiaceae")
-bull.class 
 
 ggpubr::ggarrange(complexity.box, bull.class, nrow = 1, labels = c("A", "B"))
 ```
@@ -851,13 +928,13 @@ Network.edges %>%
                geom = "errorbar", width = .2, alpha = 0.5) +
   scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]],
                      cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
-  #stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = T) +  
+  stat_compare_means(method = "wilcox", hide.ns = T, size = 3, label.y = 0) +  
   ylab("Cumulative mean edge weight") + 
   xlab("")+
   theme_classic() +
   labs(color = "") + 
   coord_flip()+
-  facet_wrap(Treatment_label~DPF, scales = "free_x", ncol = 6) +
+  facet_wrap(Treatment_label~DPF, scales = "free_x", ncol = 3) +
   theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
    strip.text.x = element_text(size = 12, color = "black"),
    legend.position="none", 
