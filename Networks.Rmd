@@ -556,7 +556,7 @@ complexity.box <- ggplot(Network.complexity[Network.complexity$Crop == "Soy",], 
   geom_point(position = position_jitterdodge(), shape = 21) +
   ylab("Linkage density") + 
   xlab("")+
-  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = T, label.y = 7.5, size = 6) +  
+  stat_compare_means(method = "wilcox", aes(label = ..p.format..), hide.ns = T, label.y = 7.5, size = 6) +  
   scale_fill_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide"), name = "") +
   theme_classic() +
   labs(color = "") + 
@@ -583,30 +583,32 @@ nodes.box <- ggplot(Network.complexity[Network.complexity$Crop == "Soy",], aes(x
    legend.position="top")
 
 #### NUMBER OF EDGES PER NODE (i.e., Network Complexity) Corn ####
-complexity.box.corn <- ggplot(Network.complexity[Network.complexity$Crop == "Corn",], aes(x = DPF, y = complexity, color = Fungicide)) + 
+complexity.box.corn <- ggplot(Network.complexity[Network.complexity$Crop == "Corn",], aes(x = DPF, y = complexity, fill = Fungicide)) + 
   geom_boxplot(outlier.shape = NA) + 
-  geom_point(position = position_jitterdodge()) +
+  geom_point(position = position_jitterdodge(), shape = 21) +
   ylab("Linkage density") + 
   xlab("")+
-  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = T, label.y = 1, size = 6) +  
-  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = T, label.y = 7.5, size = 6) +  
+  scale_fill_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide"), name = "") +
   theme_classic() +
   labs(color = "") + 
+  #ylim(c(0, 8.5)) +
   facet_wrap(~Crop*Treatment_label, scales = "free") +
   theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
    strip.text.x = element_text(size = 12, color = "black"),
    legend.position="top")
 
 #### NUMBER OF NODEs Corn####
-nodes.box.corn <- ggplot(Network.complexity[Network.complexity$Crop == "Corn",], aes(x = DPF, y = n.nodes, color = Fungicide)) + 
+nodes.box.corn <- ggplot(Network.complexity[Network.complexity$Crop == "Corn",], aes(x = DPF, y = n.nodes, fill = Fungicide)) + 
   geom_boxplot(outlier.shape = NA) + 
-  geom_point(position = position_jitterdodge()) +
+  geom_point(position = position_jitterdodge(), shape =21) +
   ylab("Nodes") + 
   xlab("")+
-  stat_compare_means(method = "wilcox", aes(label = ..p.adj..), hide.ns = T, label.y = 100, size = 6) +  
-  scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
+  stat_compare_means(method = "wilcox", aes(label = ..p.signif..), hide.ns = T, label.y = 350, size = 6) +  
+  scale_fill_manual(values=c(cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
   theme_classic() +
   labs(color = "") + 
+  ylim(c(0, 500)) +
   facet_wrap(~Crop*Treatment_label, scales = "free") +
   theme(strip.background = element_rect(color="white", fill="white", size=1.5, linetype="solid"),
    strip.text.x = element_text(size = 12, color = "black"),
@@ -614,6 +616,8 @@ nodes.box.corn <- ggplot(Network.complexity[Network.complexity$Crop == "Corn",],
 
 
 ggpubr::ggarrange(complexity.box, nodes.box, nrow = 1, labels = c("(a)", "(b)"), common.legend = T)
+
+ggpubr::ggarrange(complexity.box.corn, nodes.box.corn, nrow = 1, labels = c("(a)", "(b)"), common.legend = T)
 ```
 
 ```{r}
@@ -928,7 +932,7 @@ Network.edges %>%
                geom = "errorbar", width = .2, alpha = 0.5) +
   scale_color_manual(values=c(cbbPalette[[1]], cbbPalette[[2]],
                      cbbPalette[[1]], cbbPalette[[2]]), labels = c("Control", "Fungicide")) +
-  stat_compare_means(method = "wilcox", hide.ns = T, size = 3, label.y = 0) +  
+  #stat_compare_means(method = "wilcox", hide.ns = T, size = 3, label.y = 0) +  
   ylab("Cumulative mean edge weight") + 
   xlab("")+
   theme_classic() +

@@ -104,18 +104,36 @@ Evenness - dependent on Growthstage and Compartemnt primarily
 
 As expected, Prokaryotes varied by crop species, and plant compartment as did fungi. They also varied throughout the season and by treatment. But there is no substantial evidence that community composition varied by fungicide application
 
-TABLE S2
+TABLE S5
 ```{r SOY LEAF - FUNGICIDE ADONIS}
-## R3 - Bacteria leaves Soybean
+#### Full Model ####
+bacteria.norm.leaf.soy <- bacteria.css.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+
+bacteria.norm.leaf.soy.bray = phyloseq::distance(bacteria.norm.leaf.soy, "bray") # create bray-curtis distance matrix
+
+adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment*GrowthStage, as(sample_data(bacteria.norm.leaf.soy), "data.frame")) 
+
+###### R3 - Bacteria leaves Soybean #####
 bacteria.norm.leaf.soy.R3 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
-
+bacteria.norm.leaf.soy.R3@sam_data
 bacteria.norm.leaf.soy.bray = phyloseq::distance(bacteria.norm.leaf.soy.R3, "bray") # create bray-curtis distance matrix
 
-adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.leaf.soy.R3), "data.frame"), permutations = 9999) 
+## Set up factors for the Plots and Blocks
+plts <- gl(2, 3) ## 2 Plots (Fungicide & control) of 3 samples each for each time point
+blks <- gl(4,6) ## 4 Blocks of 6 samples each
 
-## R4 - Bacteria leaves Soybean
+## permutation design
+h1 <- how(within = Within(type = "series", mirror = TRUE),
+          plots = Plots(strata = plts, type = "series"),
+          blocks = blks, nperm = 9999)
+
+adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment + Rep, as(sample_data(bacteria.norm.leaf.soy.R3), "data.frame"), permutations = h1) 
+
+####### R4 - Bacteria leaves Soybean ######
 bacteria.norm.leaf.soy.R4 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -124,7 +142,7 @@ bacteria.norm.leaf.soy.bray = phyloseq::distance(bacteria.norm.leaf.soy.R4, "bra
 
 adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.leaf.soy.R4), "data.frame"), permutations = 9999) 
 
-## R6 - Bacteria leaves Soybean
+######## R6 - Bacteria leaves Soybean #######
 bacteria.norm.leaf.soy.R6 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -134,9 +152,18 @@ bacteria.norm.leaf.soy.bray = phyloseq::distance(bacteria.norm.leaf.soy.R6, "bra
 adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.leaf.soy.R6), "data.frame"), permutations = 9999) 
 ``` 
  
-TABLE S2
+TABLE S5
 ```{r SOY ROOT - FUNGICIDE}
-## R3 - Bacteria root Soybean
+#### Full Model ####
+bacteria.norm.root.soy <- bacteria.css.norm %>% 
+  subset_samples(Compartment == "Root" & Crop == "Soy") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+
+bacteria.norm.root.soy.bray = phyloseq::distance(bacteria.norm.root.soy, "bray") # create bray-curtis distance matrix
+
+adonis2(bacteria.norm.root.soy.bray~Fungicide*Treatment*GrowthStage, as(sample_data(bacteria.norm.root.soy), "data.frame")) 
+
+#### R3 - Bacteria root Soybean ####
 bacteria.norm.root.soy.R3 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Soy" & GrowthStage == "R3") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -145,7 +172,7 @@ bacteria.norm.leaf.soy.bray = phyloseq::distance(bacteria.norm.leaf.soy.R3, "bra
 
 adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.root.soy.R3), "data.frame"), permutations = 9999) 
 
-## R4 - Bacteria root Soybean
+#### R4 - Bacteria root Soybean ####
 bacteria.norm.root.soy.R4 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Soy" & GrowthStage == "R4") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -154,7 +181,7 @@ bacteria.norm.leaf.soy.bray = phyloseq::distance(bacteria.norm.root.soy.R4, "bra
 
 adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.root.soy.R4), "data.frame"), permutations = 9999) 
 
-## R6 - Bacteria root Soybean
+#### R6 - Bacteria root Soybean ####
 bacteria.norm.root.soy.R6 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Soy" & GrowthStage == "R6") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -164,9 +191,18 @@ bacteria.norm.leaf.soy.bray = phyloseq::distance(bacteria.norm.root.soy.R6, "bra
 adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.root.soy.R6), "data.frame"), permutations = 9999) 
 ``` 
 
-TABLE S2
+TABLE S5
 ```{r CORN ROOT - FUNGICIDE}
-## v6 - Bacteria Root Corn
+#### Full Model ####
+bacteria.norm.root.corn <- bacteria.css.norm %>% 
+  subset_samples(Compartment == "Root" & Crop == "Corn") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+
+bacteria.norm.root.corn.bray = phyloseq::distance(bacteria.norm.root.corn, "bray") # create bray-curtis distance matrix
+
+adonis2(bacteria.norm.root.corn.bray~Fungicide*Treatment*GrowthStage, as(sample_data(bacteria.norm.root.corn), "data.frame"))
+
+#### v6 - Bacteria Root Corn ####
 bacteria.norm.root.corn.V6 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Corn" & GrowthStage == "V6") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -175,7 +211,7 @@ bacteria.norm.leaf.corn.bray = phyloseq::distance(bacteria.norm.root.corn.V6, "b
 
 adonis2(bacteria.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.root.corn.V6), "data.frame"), permutations = 9999) 
 
-## v8 - Bacteria Root Corn
+#### v8 - Bacteria Root Corn ####
 bacteria.norm.root.corn.V8 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Corn" & GrowthStage == "V8") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -184,7 +220,7 @@ bacteria.norm.leaf.corn.bray = phyloseq::distance(bacteria.norm.root.corn.V8, "b
 
 adonis2(bacteria.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.root.corn.V8), "data.frame"), permutations = 9999) 
 
-## v15 - Bacteria Root Corn
+#### v15 - Bacteria Root Corn ####
 bacteria.norm.root.corn.V15 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Corn" & GrowthStage == "V15") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -194,9 +230,18 @@ bacteria.norm.leaf.corn.bray = phyloseq::distance(bacteria.norm.root.corn.V15, "
 adonis2(bacteria.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.root.corn.V15), "data.frame"), permutations = 9999) 
 ``` 
 
-TABLE S2
+TABLE S5
 ```{r CORN LEAVES - FUNGICIDE}
-## v6 - Bacteria leaf Corn
+#### Full Model ####
+bacteria.norm.leaves.corn <- bacteria.css.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+
+bacteria.norm.leaf.corn.bray = phyloseq::distance(bacteria.norm.leaves.corn, "bray") # create bray-curtis distance matrix
+
+adonis2(bacteria.norm.leaf.corn.bray~Fungicide*Treatment*GrowthStage, as(sample_data(bacteria.norm.leaves.corn), "data.frame"))
+
+#### v6 - Bacteria leaf Corn ####
 bacteria.norm.leaf.corn.V6 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Corn" & GrowthStage == "V6") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -205,7 +250,7 @@ bacteria.norm.leaf.corn.bray = phyloseq::distance(bacteria.norm.leaf.corn.V6, "b
 
 adonis2(bacteria.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.leaf.corn.V6), "data.frame"), permutations = 9999) 
 
-## v8 - Bacteria leaf Corn
+#### v8 - Bacteria leaf Corn ####
 bacteria.norm.leaf.corn.V8 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Corn" & GrowthStage == "V8") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -214,7 +259,7 @@ bacteria.norm.leaf.corn.bray = phyloseq::distance(bacteria.norm.leaf.corn.V8, "b
 
 adonis2(bacteria.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(bacteria.norm.leaf.corn.V8), "data.frame"), permutations = 9999) 
 
-## v15 - Bacteria leaf Corn
+#### v15 - Bacteria leaf Corn ####
 bacteria.norm.leaf.corn.V15 <- bacteria.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Corn" & GrowthStage == "V15") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -251,7 +296,7 @@ fungi.css.norm.corn <- fungi.css.norm %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
 ```
 
-## Alpha diversity on prokaryotes
+## Alpha diversity on fungi
 -Switch out the alpha diversity estimate to test different measures
 ```{r}
 #This line is to subset the dataset to a specific lineage
@@ -334,9 +379,18 @@ plot_grid(Corn.bull.richness,
 
 ## FUNGI Beta-diversity
 
-TABLE S1
+TABLE S4
 ```{r SOY LEAF - FUNGICIDE ADONIS}
-## R3 - fungi leaves Soybean
+#### Full Model ####
+fungi.norm.leaves.soy <- fungi.css.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Soy") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+
+fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.leaves.soy, "bray") # create bray-curtis distance matrix
+
+adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment*GrowthStage, as(sample_data(fungi.norm.leaves.soy), "data.frame"))
+
+###### R3 - fungi leaves Soybean #####
 fungi.norm.leaf.soy.R3 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R3") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -345,7 +399,7 @@ fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.leaf.soy.R3, "bray") # 
 
 adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(fungi.norm.leaf.soy.R3), "data.frame"), permutations = 9999) 
 
-## R4 - fungi leaves Soybean
+###### R4 - fungi leaves Soybean ######
 fungi.norm.leaf.soy.R4 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R4") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -354,7 +408,7 @@ fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.leaf.soy.R4, "bray") # 
 
 adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(fungi.norm.leaf.soy.R4), "data.frame"), permutations = 9999) 
 
-## R6 - fungi leaves Soybean
+###### R6 - fungi leaves Soybean ######
 fungi.norm.leaf.soy.R6 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Soy" & GrowthStage == "R6") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -364,9 +418,18 @@ fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.leaf.soy.R6, "bray") # 
 adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(fungi.norm.leaf.soy.R6), "data.frame"), permutations = 9999) 
 ``` 
  
-TABLE S1
+TABLE S4
 ```{r SOY ROOT - FUNGICIDE}
-## R3 - fungi root Soybean
+#### Full Model ####
+fungi.norm.root.soy <- fungi.css.norm %>% 
+  subset_samples(Compartment == "Root" & Crop == "Soy") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+
+fungi.norm.root.soy.bray = phyloseq::distance(fungi.norm.root.soy, "bray") # create bray-curtis distance matrix
+
+adonis2(fungi.norm.root.soy.bray~Fungicide*Treatment*GrowthStage, as(sample_data(fungi.norm.root.soy), "data.frame"))
+
+###### R3 - fungi root Soybean ######
 fungi.norm.root.soy.R3 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Soy" & GrowthStage == "R3") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -375,7 +438,7 @@ fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.leaf.soy.R3, "bray") # 
 
 adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(fungi.norm.root.soy.R3), "data.frame"), permutations = 9999) 
 
-## R4 - fungi root Soybean
+###### R4 - fungi root Soybean ######
 fungi.norm.root.soy.R4 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Soy" & GrowthStage == "R4") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -384,7 +447,7 @@ fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.root.soy.R4, "bray") # 
 
 adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(fungi.norm.root.soy.R4), "data.frame"), permutations = 9999) 
 
-## R6 - fungi root Soybean
+###### R6 - fungi root Soybean ######
 fungi.norm.root.soy.R6 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Soy" & GrowthStage == "R6") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -394,9 +457,18 @@ fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.root.soy.R6, "bray") # 
 adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(fungi.norm.root.soy.R6), "data.frame"), permutations = 9999) 
 ``` 
 
-TABLE S1
+TABLE S4
 ```{r CORN ROOT - FUNGICIDE}
-## v6 - fungi Root Corn
+#### Full Model ####
+fungi.norm.root.corn <- fungi.css.norm %>% 
+  subset_samples(Compartment == "Root" & Crop == "Corn") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+
+fungi.norm.root.corn.bray = phyloseq::distance(fungi.norm.root.corn, "bray") # create bray-curtis distance matrix
+
+adonis2(fungi.norm.root.corn.bray~Fungicide*Treatment*GrowthStage, as(sample_data(fungi.norm.root.corn), "data.frame"))
+
+###### v6 - fungi Root Corn ######
 fungi.norm.root.corn.V6 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Corn" & GrowthStage == "V6") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -405,7 +477,7 @@ fungi.norm.leaf.corn.bray = phyloseq::distance(fungi.norm.root.corn.V6, "bray") 
 
 adonis2(fungi.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(fungi.norm.root.corn.V6), "data.frame"), permutations = 9999) 
 
-## v8 - fungi Root Corn
+###### v8 - fungi Root Corn ######
 fungi.norm.root.corn.V8 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Corn" & GrowthStage == "V8") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -414,7 +486,7 @@ fungi.norm.leaf.corn.bray = phyloseq::distance(fungi.norm.root.corn.V8, "bray") 
 
 adonis2(fungi.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(fungi.norm.root.corn.V8), "data.frame"), permutations = 9999) 
 
-## v15 - fungi Root Corn
+###### v15 - fungi Root Corn ######
 fungi.norm.root.corn.V15 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Root" & Crop == "Corn" & GrowthStage == "V15") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -424,9 +496,18 @@ fungi.norm.leaf.corn.bray = phyloseq::distance(fungi.norm.root.corn.V15, "bray")
 adonis2(fungi.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(fungi.norm.root.corn.V15), "data.frame"), permutations = 9999) 
 ``` 
 
-TABLE S1
+TABLE S4
 ```{r CORN LEAVES - FUNGICIDE}
-## v6 - fungi leaf Corn
+#### Full Model ####
+fungi.norm.leaf.corn <- fungi.css.norm %>% 
+  subset_samples(Compartment == "Leaf" & Crop == "Corn") %>%
+  phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
+
+fungi.norm.leaf.corn.bray = phyloseq::distance(fungi.norm.leaf.corn, "bray") # create bray-curtis distance matrix
+
+adonis2(fungi.norm.leaf.corn.bray~Fungicide*Treatment*GrowthStage, as(sample_data(fungi.norm.leaf.corn), "data.frame"))
+
+###### v6 - fungi leaf Corn ######
 fungi.norm.leaf.corn.V6 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Corn" & GrowthStage == "V6") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -435,7 +516,7 @@ fungi.norm.leaf.corn.bray = phyloseq::distance(fungi.norm.leaf.corn.V6, "bray") 
 
 adonis2(fungi.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(fungi.norm.leaf.corn.V6), "data.frame"), permutations = 9999) 
 
-## v8 - fungi leaf Corn
+###### v8 - fungi leaf Corn ######
 fungi.norm.leaf.corn.V8 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Corn" & GrowthStage == "V8") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
@@ -444,7 +525,7 @@ fungi.norm.leaf.corn.bray = phyloseq::distance(fungi.norm.leaf.corn.V8, "bray") 
 
 adonis2(fungi.norm.leaf.corn.bray~Fungicide*Treatment, as(sample_data(fungi.norm.leaf.corn.V8), "data.frame"), permutations = 9999) 
 
-## v15 - fungi leaf Corn
+###### v15 - fungi leaf Corn ######
 fungi.norm.leaf.corn.V15 <- fungi.css.norm %>% 
   subset_samples(Compartment == "Leaf" & Crop == "Corn" & GrowthStage == "V15") %>%
   phyloseq::filter_taxa(function(x) sum(x) > 0, TRUE) 
