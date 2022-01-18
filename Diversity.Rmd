@@ -113,7 +113,7 @@ bacteria.norm.leaf.soy <- bacteria.css.norm %>%
 
 bacteria.norm.leaf.soy.bray = phyloseq::distance(bacteria.norm.leaf.soy, "bray") # create bray-curtis distance matrix
 
-adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment*GrowthStage, as(sample_data(bacteria.norm.leaf.soy), "data.frame")) 
+adonis2(bacteria.norm.leaf.soy.bray~Fungicide*Treatment*GrowthStage, as(sample_data(bacteria.norm.leaf.soy), "data.frame"), by = "margin") 
 
 ###### R3 - Bacteria leaves Soybean #####
 bacteria.norm.leaf.soy.R3 <- bacteria.css.norm %>% 
@@ -388,7 +388,8 @@ fungi.norm.leaves.soy <- fungi.css.norm %>%
 
 fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.leaves.soy, "bray") # create bray-curtis distance matrix
 
-adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment*GrowthStage, as(sample_data(fungi.norm.leaves.soy), "data.frame"))
+set.seed(12325)
+adonis2(fungi.norm.leaf.soy.bray~Fungicide + Treatment + GrowthStage + Fungicide:Treatment + Fungicide:GrowthStage + Fungicide:Treatment:GrowthStage, as(sample_data(fungi.norm.leaves.soy), "data.frame"))
 
 ###### R3 - fungi leaves Soybean #####
 fungi.norm.leaf.soy.R3 <- fungi.css.norm %>% 
@@ -417,7 +418,7 @@ fungi.norm.leaf.soy.bray = phyloseq::distance(fungi.norm.leaf.soy.R6, "bray") # 
 
 adonis2(fungi.norm.leaf.soy.bray~Fungicide*Treatment, as(sample_data(fungi.norm.leaf.soy.R6), "data.frame"), permutations = 9999) 
 ``` 
- 
+
 TABLE S4
 ```{r SOY ROOT - FUNGICIDE}
 #### Full Model ####
@@ -427,7 +428,8 @@ fungi.norm.root.soy <- fungi.css.norm %>%
 
 fungi.norm.root.soy.bray = phyloseq::distance(fungi.norm.root.soy, "bray") # create bray-curtis distance matrix
 
-adonis2(fungi.norm.root.soy.bray~Fungicide*Treatment*GrowthStage, as(sample_data(fungi.norm.root.soy), "data.frame"))
+set.seed(12325)
+adonis2(fungi.norm.root.soy.bray~Fungicide + Treatment + GrowthStage + Fungicide:Treatment + Fungicide:GrowthStage + Fungicide:Treatment:GrowthStage, as(sample_data(fungi.norm.root.soy), "data.frame"))
 
 ###### R3 - fungi root Soybean ######
 fungi.norm.root.soy.R3 <- fungi.css.norm %>% 
@@ -466,7 +468,7 @@ fungi.norm.root.corn <- fungi.css.norm %>%
 
 fungi.norm.root.corn.bray = phyloseq::distance(fungi.norm.root.corn, "bray") # create bray-curtis distance matrix
 
-adonis2(fungi.norm.root.corn.bray~Fungicide*Treatment*GrowthStage, as(sample_data(fungi.norm.root.corn), "data.frame"))
+adonis2(fungi.norm.root.corn.bray~Fungicide + Treatment + GrowthStage + Fungicide:Treatment + Fungicide:GrowthStage + Fungicide:GrowthStage:Treatment , as(sample_data(fungi.norm.root.corn), "data.frame"))
 
 ###### v6 - fungi Root Corn ######
 fungi.norm.root.corn.V6 <- fungi.css.norm %>% 
@@ -505,7 +507,8 @@ fungi.norm.leaf.corn <- fungi.css.norm %>%
 
 fungi.norm.leaf.corn.bray = phyloseq::distance(fungi.norm.leaf.corn, "bray") # create bray-curtis distance matrix
 
-adonis2(fungi.norm.leaf.corn.bray~Fungicide*Treatment*GrowthStage, as(sample_data(fungi.norm.leaf.corn), "data.frame"))
+set.seed(12325)
+adonis2(fungi.norm.leaf.corn.bray~Fungicide + Treatment + GrowthStage + Fungicide:Treatment + Fungicide:GrowthStage + Fungicide:Treatment:GrowthStage, as(sample_data(fungi.norm.leaf.corn), "data.frame"))
 
 ###### v6 - fungi leaf Corn ######
 fungi.norm.leaf.corn.V6 <- fungi.css.norm %>% 
